@@ -134,7 +134,7 @@ find_path(RAPIDJSON_INCLUDE_DIR
 
 add_library(RapidJSON INTERFACE)
 
-file(GLOB SOURCES src/*.cpp)
+file(GLOB SOURCES CONFIGURE_DEPENDS src/*.cpp)
 add_executable(CloudNode ${SOURCES})
 target_link_libraries(CloudNode PRIVATE
     datachannel
