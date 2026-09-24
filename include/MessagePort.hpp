@@ -11,7 +11,7 @@
 #include <mutex>
 #include <string_view>
 
-class ControlPort {
+class MessagePort {
 public:
     struct PerSocketData {
         std::string x_client_id;
@@ -26,12 +26,12 @@ public:
         Client
     };
 
-    virtual ~ControlPort() = default;
+    virtual ~MessagePort() = default;
 
-    ControlPort(const ControlPort&) = delete;
-    ControlPort& operator=(const ControlPort&) = delete;
+    MessagePort(const MessagePort&) = delete;
+    MessagePort& operator=(const MessagePort&) = delete;
 
-    static std::unique_ptr<ControlPort> Create(Type type);
+    static std::unique_ptr<MessagePort> Create(Type type);
 
     virtual void OnMessage(MessageCallback callback) = 0;
     virtual void OnClose(CloseCallback callback) = 0;
@@ -42,7 +42,14 @@ public:
     virtual bool IsRunning() = 0;
 
 protected:
-    ControlPort() = default;
+    MessagePort() = default;
+    MessageCallback messageCallback_;
+    CloseCallback closeCallback_;
+    MessageCallback openCallback_;
+    std::thread serverThread_;
+    std::atomic<bool> isRunning_{false};
+    std::mutex mtx_;
+    std::condition_variable cv_;
 };
 
 #endif // CONTROL_PORT_HPP

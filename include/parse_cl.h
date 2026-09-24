@@ -32,8 +32,8 @@ class Cmdline
 {
 private:
   /* parameters */
-  int _p;
-  bool _m;
+  std::string _messageAddress;
+  int _messagePort;
   std::string _stunAddress;
   int _stunPort;
   std::string _n;
@@ -58,8 +58,8 @@ public:
   /* return next (non-option) parameter */
   int next_param () { return _optind; }
 
-  int p () const { return _p; }
-  bool m () const { return _m; }
+  std::string messageAddress () const { return _messageAddress; }
+  int messagePort () const { return _messagePort; }
   std::string stunAddress () const { return _stunAddress; }
   int stunPort () const { return _stunPort; }
   std::string n () const { return _n; }

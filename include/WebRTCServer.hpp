@@ -9,15 +9,16 @@
 
 class WebRTCServer final : public WebRTC {
 public:
-    void ControlOpen(ControlPort::Ws * ws, const std::string& user);
-    void ControlClose(ControlPort::Ws * ws, int code, std::string_view message);
+    void MessageOpen(MessagePort::Ws * ws, const std::string& user) override;
+    void MessageClose(MessagePort::Ws * ws, int code, std::string_view message) override;
 
 protected:
-    void JoinCommand(ControlPort::Ws * ws, rapidjson::Document& doc) override;
-    void LeaveCommand(ControlPort::Ws * ws, rapidjson::Document& doc) override;
-    void FileAcceptCommand(ControlPort::Ws * ws, rapidjson::Document& doc) override;
-    void FileOfferCommand(ControlPort::Ws * ws, rapidjson::Document& doc) override;
-    void PingCommand(ControlPort::Ws * ws, rapidjson::Document& doc) override;
+
+    void Join(MessagePort::Ws * ws, rapidjson::Document& doc) override;
+    void Leave(MessagePort::Ws * ws, rapidjson::Document& doc) override;
+    void FileAccept(MessagePort::Ws * ws, rapidjson::Document& doc) override;
+    void FileOffer(MessagePort::Ws * ws, rapidjson::Document& doc) override;
+    void Ping(MessagePort::Ws * ws, rapidjson::Document& doc) override;
 
 private:
     struct FileDetails {
@@ -28,10 +29,10 @@ private:
 
     void SendJoinNotification(const std::string& whoToNotify, const std::string& whoJoined);
     void SendLeaveNotification(const std::string& whoToNotify, const std::string& whoLeft);
-    void LeaveCommand(ControlPort::Ws * ws, const std::string& user, const std::string& room);
-    void HandleFileCommand(ControlPort::Ws * ws, rapidjson::Document& doc, FileDetails& file);
+    void Leave(MessagePort::Ws * ws, const std::string& user, const std::string& room);
+    void HandleFile(MessagePort::Ws * ws, rapidjson::Document& doc, FileDetails& file);
 
-    std::map<std::string, ControlPort::Ws*> clientDB_;
+    std::map<std::string, MessagePort::Ws*> clientDB_;
     std::map<std::string, std::string> pendingOffers_;
     std::map<std::string, std::vector<std::string>> rooms_;
 };

@@ -1,5 +1,5 @@
-p    / port                 int     8080
-m    / serverMode           flag    "run in server mode"
+NONE / controlAddress      string  {""}
+NONE / controlPort         int     8080
 NONE / stunAddress          string  {"stun.l.google.com"}
 NONE / stunPort             int     19302
 n    / name                 string  {""}

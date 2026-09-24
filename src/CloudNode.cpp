@@ -10,7 +10,7 @@
 #include "parse_cl.h"
 #include "RandomName.hpp"
 #include "LocalDescription.hpp"
-#include "ControlPort.hpp"
+#include "MessagePort.hpp"
 #include "WebRTC.hpp"
 #include "WebRTCServer.hpp"
 #include "Logger.hpp"
@@ -134,34 +134,38 @@ main(
 
     Logger::info() << "'" << name << "' is coming online.";
 
+    bool isServer = params.messageAddress().empty();
+
     auto webRTC = WebRTC::Create(
-        params.m() ? WebRTC::Type::Server : WebRTC::Type::Client
+        isServer ? WebRTC::Type::Server : WebRTC::Type::Client
     );
 
-    if (params.m()) {
-        Logger::info() << "Running in server mode.";
+    Logger::info()
+        << "Running in"
+        << (isServer ? " SERVER " : " CLIENT ")
+        << "mode.";
 
-        auto *server = dynamic_cast<WebRTCServer *>(webRTC.get());
-        ControlPort control;
-        control.OnOpen([server](ControlPort::Ws * ws, const std::string& user) {
-            server->ControlOpen(ws, user);
-        });
-        control.OnClose([server](ControlPort::Ws * ws, int code, std::string_view message) {
-            server->ControlClose(ws, code, message);
-        });
-        control.OnMessage([webRTC = webRTC.get()](ControlPort::Ws * ws, const std::string& message) {
-            webRTC->ControlCommandRouter(ws, message);
-        });
+    auto message = MessagePort::Create(
+        isServer ? MessagePort::Type::Server : MessagePort::Type::Client
+    );
 
-        if (control.Start(params.p())) {
-            Logger::info() << "Control Server running on port: " << params.p();
-            while (!StopRequested(g_stopToken)) {
-                std::this_thread::sleep_for(std::chrono::seconds(3));
-            }
-            control.Stop();
+    message->OnOpen([webRTC = webRTC.get()](MessagePort::Ws * ws, const std::string& user) {
+        webRTC->MessageOpen(ws, user);
+    });
+
+    message->OnClose([webRTC = webRTC.get()](MessagePort::Ws * ws, int code, std::string_view message) {
+        webRTC->MessageClose(ws, code, message);
+    });
+
+    message->OnMessage([webRTC = webRTC.get()](MessagePort::Ws * ws, const std::string& message) {
+        webRTC->MessageRouter(ws, message);
+    });
+
+    if (message->Start(params.messagePort())) {
+        while (!StopRequested(g_stopToken)) {
+            std::this_thread::sleep_for(std::chrono::seconds(3));
         }
-    } else {
-        Logger::info() << "STUN server is '" << stunServer << "'.";
+        message->Stop();
     }
 
     return 0;

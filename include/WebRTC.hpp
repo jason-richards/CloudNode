@@ -1,7 +1,7 @@
 #ifndef WEBRTC_HPP
 #define WEBRTC_HPP
 
-#include "ControlPort.hpp"
+#include "MessagePort.hpp"
 
 #include <rapidjson/document.h>
 
@@ -30,8 +30,8 @@ public:
 
     static std::unique_ptr<WebRTC> Create(Type type);
 
-    void ControlCommandRouter(
-        ControlPort::Ws * ws,
+    void MessageRouter(
+        MessagePort::Ws * ws,
         const std::string& jsonStr
     ) {
         rapidjson::Document doc;
@@ -44,29 +44,33 @@ public:
         std::string type = doc["type"].GetString();
         switch (string_hash(type)) {
             case string_hash("join"):
-                JoinCommand(ws, doc);
+                Join(ws, doc);
                 break;
             case string_hash("leave"):
-                LeaveCommand(ws, doc);
+                Leave(ws, doc);
                 break;
             case string_hash("file_accept"):
-                FileAcceptCommand(ws, doc);
+                FileAccept(ws, doc);
                 break;
             case string_hash("file_offer"):
-                FileOfferCommand(ws, doc);
+                FileOffer(ws, doc);
                 break;
             case string_hash("ping"):
-                PingCommand(ws, doc);
+                Ping(ws, doc);
                 break;
         }
     }
 
+    virtual void MessageOpen(MessagePort::Ws * ws, const std::string& user) = 0;
+    virtual void MessageClose(MessagePort::Ws * ws, int code, std::string_view message) = 0;
+
 protected:
-    virtual void JoinCommand(ControlPort::Ws * ws, rapidjson::Document& doc) = 0;
-    virtual void LeaveCommand(ControlPort::Ws * ws, rapidjson::Document& doc) = 0;
-    virtual void FileAcceptCommand(ControlPort::Ws * ws, rapidjson::Document& doc) = 0;
-    virtual void FileOfferCommand(ControlPort::Ws * ws, rapidjson::Document& doc) = 0;
-    virtual void PingCommand(ControlPort::Ws * ws, rapidjson::Document& doc) = 0;
+
+    virtual void Join(MessagePort::Ws * ws, rapidjson::Document& doc) = 0;
+    virtual void Leave(MessagePort::Ws * ws, rapidjson::Document& doc) = 0;
+    virtual void FileAccept(MessagePort::Ws * ws, rapidjson::Document& doc) = 0;
+    virtual void FileOffer(MessagePort::Ws * ws, rapidjson::Document& doc) = 0;
+    virtual void Ping(MessagePort::Ws * ws, rapidjson::Document& doc) = 0;
 };
 
 #endif // WEBRTC_HPP

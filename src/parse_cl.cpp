@@ -34,10 +34,10 @@ Cmdline::Cmdline (int argc, char *argv[])
 
   static struct option long_options[] =
   {
-    {"port", required_argument, NULL, 'p'},
-    {"serverMode", no_argument, NULL, 'm'},
-    {"stunAddress", required_argument, NULL, 256},
-    {"stunPort", required_argument, NULL, 257},
+    {"messageAddress", required_argument, NULL, 256},
+    {"messagePort", required_argument, NULL, 257},
+    {"stunAddress", required_argument, NULL, 258},
+    {"stunPort", required_argument, NULL, 259},
     {"name", required_argument, NULL, 'n'},
     {"destination", required_argument, NULL, 'd'},
     {"room", required_argument, NULL, 'r'},
@@ -50,31 +50,30 @@ Cmdline::Cmdline (int argc, char *argv[])
   _program_name += argv[0];
 
   /* default values */
-  _p = 8080;
-  _m = false;
+  _messagePort = 8080;
   _stunAddress = "stun.l.google.com";
   _stunPort = 19302;
   _h = false;
   _v = false;
 
   optind = 0;
-  while ((c = getopt_long (argc, argv, "p:mn:d:r:f:hv", long_options, &optind)) != - 1)
+  while ((c = getopt_long (argc, argv, "n:d:r:f:hv", long_options, &optind)) != - 1)
     {
       switch (c)
         {
-        case 'p': 
-          _p = atoi (optarg);
+        case 256:
+          _messageAddress = optarg;
           break;
 
-        case 'm': 
-          _m = true;
+        case 257:
+          _messagePort = atoi (optarg);
           break;
 
-        case 256: 
+        case 258:
           _stunAddress = optarg;
           break;
 
-        case 257: 
+        case 259:
           _stunPort = atoi (optarg);
           break;
 
@@ -129,9 +128,8 @@ void Cmdline::usage (int status)
       std::cout << "\
 usage: " << _program_name << " [options]\n\
 Cloud server client configuration.\n\
-   [ -p ] [ --port ] (type=INTEGER, default=8080)\n\
-   [ -m ] [ --serverMode ] (type=FLAG)\n\
-          run in server mode\n\
+  [ --messageAddress ] (type=STRING)\n\
+  [ --messagePort ] (type=INTEGER, default=8080)\n\
    [ --stunAddress ] (type=STRING, default=stun.l.google.com)\n\
    [ --stunPort ] (type=INTEGER, default=19302)\n\
    [ -n ] [ --name ] (type=STRING)\n\

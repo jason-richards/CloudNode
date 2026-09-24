@@ -43,6 +43,13 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(datachannel)
 
+FetchContent_Declare(
+    ixwebsocket
+    GIT_REPOSITORY https://github.com/machinezone/IXWebSocket.git
+    GIT_TAG v11.4.6
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(ixwebsocket)
 
 # ------------------------------------------------------------------------------
 # 1. Fetch uSockets (C backend)
@@ -146,6 +153,14 @@ target_link_libraries(CloudNode PRIVATE
     OpenSSL::SSL 
     OpenSSL::Crypto
 )
+
+if(TARGET ixwebsocket)
+    target_link_libraries(CloudNode PRIVATE ixwebsocket)
+elseif(TARGET ixwebsocket::ixwebsocket)
+    target_link_libraries(CloudNode PRIVATE ixwebsocket::ixwebsocket)
+else()
+    message(FATAL_ERROR "IXWebSocket target was not created by FetchContent.")
+endif()
 target_include_directories(CloudNode PRIVATE ${B64_INCLUDE_DIR} ${RAPIDJSON_INCLUDE_DIR})
 
 # Testing setup

@@ -16,8 +16,8 @@
  * @param doc Parsed command document.
  */
 void
-WebRTCServer::PingCommand(
-    ControlPort::Ws * ws,
+WebRTCServer::Ping(
+    MessagePort::Ws * ws,
     rapidjson::Document& doc
 ) {
     (void) doc;
@@ -58,8 +58,8 @@ WebRTCServer::SendJoinNotification(
  * @param doc Parsed command document containing the room identifier.
  */
 void
-WebRTCServer::JoinCommand(
-    ControlPort::Ws * ws,
+WebRTCServer::Join(
+    MessagePort::Ws * ws,
     rapidjson::Document& doc
 ) {
     auto user = ws->getUserData()->x_client_id;
@@ -118,8 +118,8 @@ WebRTCServer::SendLeaveNotification(
  * @param room Room from which the client is leaving.
  */
 void
-WebRTCServer::LeaveCommand(
-    ControlPort::Ws * ws,
+WebRTCServer::Leave(
+    MessagePort::Ws * ws,
     const std::string& user,
     const std::string& room
 ) {
@@ -150,8 +150,8 @@ WebRTCServer::LeaveCommand(
  * @param doc Parsed command document containing the room identifier.
  */
 void
-WebRTCServer::LeaveCommand(
-    ControlPort::Ws * ws,
+WebRTCServer::Leave(
+    MessagePort::Ws * ws,
     rapidjson::Document& doc
 ) {
     auto user = ws->getUserData()->x_client_id;
@@ -160,7 +160,7 @@ WebRTCServer::LeaveCommand(
         return;
     }
 
-    LeaveCommand(ws, user, doc["room"].GetString());
+    Leave(ws, user, doc["room"].GetString());
 }
 
 
@@ -176,8 +176,8 @@ WebRTCServer::LeaveCommand(
  * @param file File metadata extracted from the command.
  */
 void
-WebRTCServer::HandleFileCommand(
-    ControlPort::Ws * ws,
+WebRTCServer::HandleFile(
+    MessagePort::Ws * ws,
     rapidjson::Document& doc,
     FileDetails& file
 ) {
@@ -227,8 +227,8 @@ WebRTCServer::HandleFileCommand(
  * @param doc Parsed file offer document.
  */
 void
-WebRTCServer::FileOfferCommand(
-    ControlPort::Ws * ws,
+WebRTCServer::FileOffer(
+    MessagePort::Ws * ws,
     rapidjson::Document& doc
 ) {
     if (!doc.HasMember("file") || !doc["file"].IsObject() ||
@@ -246,7 +246,7 @@ WebRTCServer::FileOfferCommand(
     };
     Logger::info() << "File offer from \'" << ws->getUserData()->x_client_id
                    << "\', to \'" << doc["to"].GetString() << "\': " << file.name;
-    HandleFileCommand(ws, doc, file);
+    HandleFile(ws, doc, file);
 }
 
 
@@ -258,8 +258,8 @@ WebRTCServer::FileOfferCommand(
  * @param doc Parsed file acceptance document.
  */
 void
-WebRTCServer::FileAcceptCommand(
-    ControlPort::Ws * ws,
+WebRTCServer::FileAccept(
+    MessagePort::Ws * ws,
     rapidjson::Document& doc
 ) {
     if (!doc.HasMember("file") || !doc["file"].IsObject() ||
@@ -271,7 +271,7 @@ WebRTCServer::FileAcceptCommand(
     FileDetails file{doc["file"]["name"].GetString(), 0, ""};
     Logger::info() << "File offer accept from \'" << ws->getUserData()->x_client_id
                    << "\', to \'" << doc["to"].GetString() << "\': " << file.name;
-    HandleFileCommand(ws, doc, file);
+    HandleFile(ws, doc, file);
 }
 
 
@@ -283,8 +283,8 @@ WebRTCServer::FileAcceptCommand(
  * @param user Identifier associated with the connection.
  */
 void
-WebRTCServer::ControlOpen(
-    ControlPort::Ws * ws,
+WebRTCServer::MessageOpen(
+    MessagePort::Ws * ws,
     const std::string& user
 ) {
     (void) ws;
@@ -301,8 +301,8 @@ WebRTCServer::ControlOpen(
  * @param message WebSocket close message.
  */
 void
-WebRTCServer::ControlClose(
-    ControlPort::Ws * ws,
+WebRTCServer::MessageClose(
+    MessagePort::Ws * ws,
     int code,
     std::string_view message
 ) {
@@ -312,7 +312,7 @@ WebRTCServer::ControlClose(
     Logger::info() << "\'" << user << "\' has closed connection.";
     for (const auto& [key, value] : rooms_) {
         if (std::find(rooms_[key].begin(), rooms_[key].end(), user) != rooms_[key].end()) {
-            LeaveCommand(ws, user, key);
+            Leave(ws, user, key);
         }
     }
 }
