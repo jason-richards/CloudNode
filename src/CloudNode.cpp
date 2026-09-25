@@ -11,7 +11,6 @@
 #include "RandomName.hpp"
 #include "LocalDescription.hpp"
 #include "WebRTC.hpp"
-#include "WebRTCClient.hpp"
 #include "Logger.hpp"
 #include "StopToken.hpp"
 
@@ -131,28 +130,32 @@ main(
         name = RandomNameGenerator::Generate();
     }
 
+    PropertyBag properties;
+    properties.Set("messageAddress", params.messageAddress());
+    properties.Set("messagePort", params.messagePort());
+    properties.Set("stunAddress", params.stunAddress());
+    properties.Set("stunPort", params.stunPort());
+    properties.Set("n", params.n());
+    properties.Set("d", params.d());
+    properties.Set("r", params.r());
+    properties.Set("f", params.f());
+    properties.Set("h", params.h());
+    properties.Set("v", params.v());
+    properties.Set("name", name);
+
     Logger::info() << "'" << name << "' is coming online.";
 
     bool isServer = params.messageAddress().empty();
 
-    auto webRTC = WebRTC::Create(
-        isServer ? WebRTC::Type::Server : WebRTC::Type::Client,
-        name
-    );
+    auto webRTC = WebRTC::Create(properties);
 
     Logger::info()
         << "Running in"
         << (isServer ? " SERVER " : " CLIENT ")
         << "mode.";
 
-    if (webRTC->Start(params.messageAddress(), params.messagePort())) {
-        if (auto clientRTC = dynamic_cast<WebRTCClient*>(webRTC.get())) {
-            clientRTC->JoinRoom(params.r());
-        }
+    if (webRTC->Start()) {
         while (!StopRequested(g_stopToken)) {
-            if (auto clientRTC = dynamic_cast<WebRTCClient*>(webRTC.get())) {
-                clientRTC->SendPing();
-            }
             std::this_thread::sleep_for(std::chrono::seconds(5));
         }
         webRTC->Stop();

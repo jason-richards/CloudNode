@@ -9,8 +9,6 @@ void
 WebRTCClient::JoinRoom(
     const std::string& room
 ) {
-    WaitUntilRunning();
-
     rapidjson::Document doc;
     doc.SetObject();
     auto& allocator = doc.GetAllocator();
@@ -29,7 +27,6 @@ WebRTCClient::JoinRoom(
 
 void
 WebRTCClient::SendPing() {
-    WaitUntilRunning();
     if (!SendMessage("{ \"type\" : \"ping\" }")) {
         Logger::error() << "Unable to send ping.";
     }
@@ -82,6 +79,8 @@ WebRTCClient::OnMessageOpen(
 ) {
     (void) user;
     Logger::info() << "MessagePort Opened.";
+    JoinRoom(Properties().Get<std::string>("r"));
+    //SendPing();
 }
 
 

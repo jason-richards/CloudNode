@@ -3,7 +3,6 @@
 
 #include <App.h>
 #include <atomic>
-#include <condition_variable>
 #include <string>
 #include <functional>
 #include <memory>
@@ -39,15 +38,7 @@ public:
     virtual void OnOpen(OpenCallback callback) = 0;
     virtual bool Start(const std::string& address, int port) = 0;
     virtual bool Send(const std::string& message) = 0;
-    bool WaitUntilRunning() {
-        std::unique_lock<std::mutex> lock(mtx_);
-        cv_.wait(lock, [this] {
-            return isRunning_.load() || startupFailed_.load();
-        });
-        return isRunning_.load();
-    }
     virtual void Stop() = 0;
-    virtual bool Wait() = 0;
     virtual bool IsRunning() = 0;
 
 protected:
@@ -57,9 +48,7 @@ protected:
     OpenCallback openCallback_;
     std::thread serverThread_;
     std::atomic<bool> isRunning_{false};
-    std::atomic<bool> startupFailed_{false};
     std::mutex mtx_;
-    std::condition_variable cv_;
     std::string name_;
 };
 

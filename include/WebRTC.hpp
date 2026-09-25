@@ -2,12 +2,14 @@
 #define WEBRTC_HPP
 
 #include "MessagePort.hpp"
+#include "PropertyBag.hpp"
 
 #include <rapidjson/document.h>
 
 #include <memory>
 #include <string>
 #include <string_view>
+
 
 class WebRTC {
 private:
@@ -21,18 +23,13 @@ private:
     }
 
 public:
-    enum class Type {
-        Server,
-        Client
-    };
 
     virtual ~WebRTC() = default;
 
-    static std::unique_ptr<WebRTC> Create(Type type, const std::string& name);
+    static std::unique_ptr<WebRTC> Create(const PropertyBag& properties);
 
-    bool Start(const std::string& address, int port);
+    bool Start();
     void Stop();
-    bool Wait();
     bool IsRunning();
 
     void MessageRouter(const std::string& jsonStr) {
@@ -71,7 +68,7 @@ public:
 
 protected:
 
-    WebRTC(MessagePort::Type type, const std::string& name);
+    WebRTC(MessagePort::Type type, const PropertyBag& properties);
 
     virtual void OnJoin(rapidjson::Document& doc) = 0;
     virtual void OnLeave(rapidjson::Document& doc) = 0;
@@ -80,10 +77,11 @@ protected:
     virtual void OnPingPong(rapidjson::Document& doc) = 0;
 
     bool SendMessage(const std::string& message) { return messagePort_->Send(message); }
-    bool WaitUntilRunning() { return messagePort_->WaitUntilRunning(); }
     MessagePort::Ws* CurrentWebSocket() const { return currentWebSocket_; }
+    const PropertyBag& Properties() const { return properties_; }
 
 private:
+    PropertyBag properties_;
     std::unique_ptr<MessagePort> messagePort_;
     MessagePort::Ws* currentWebSocket_{nullptr};
 };

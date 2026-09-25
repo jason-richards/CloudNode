@@ -9,7 +9,8 @@
 
 class WebRTCServer final : public WebRTC {
 public:
-    explicit WebRTCServer(const std::string& name) : WebRTC(MessagePort::Type::Server, name) {}
+    explicit WebRTCServer(const PropertyBag& properties)
+        : WebRTC(MessagePort::Type::Server, properties) {}
 
     void OnMessageOpen(const std::string& user) override;
     void OnMessageClose(int code, std::string_view message) override;

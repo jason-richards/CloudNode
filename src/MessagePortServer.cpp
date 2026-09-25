@@ -24,7 +24,6 @@ bool MessagePortServer::Start(const std::string& address, int port) {
         return false;
     }
 
-    startupFailed_ = false;
     serverThread_ = std::thread([this, port]() {
         uWS::App()
             .ws<PerSocketData>("/*", {
@@ -66,15 +65,12 @@ bool MessagePortServer::Start(const std::string& address, int port) {
                         std::lock_guard<std::mutex> lock(mtx_);
                         isRunning_ = true;
                     }
-                    cv_.notify_one();
                 } else {
                     std::cerr << "MessagePort failed to listen on port " << port << std::endl;
                     {
                         std::lock_guard<std::mutex> lock(mtx_);
                         isRunning_ = false;
-                        startupFailed_ = true;
                     }
-                    cv_.notify_one();
                 }
             })
             .run();
@@ -88,12 +84,6 @@ bool MessagePortServer::Send(const std::string& message) {
     return false;
 }
 
-bool MessagePortServer::Wait() {
-    std::unique_lock<std::mutex> lock(mtx_);
-    cv_.wait(lock, [this] { return !isRunning_; });
-    return true;
-}
-
 void MessagePortServer::Stop() {
     uWS::Loop* loop = nullptr;
     us_listen_socket_t* listenSocket = nullptr;
@@ -104,7 +94,6 @@ void MessagePortServer::Stop() {
         }
 
         isRunning_ = false;
-        startupFailed_ = true;
         loop = loop_;
         listenSocket = listenSocket_;
     }
@@ -121,7 +110,6 @@ void MessagePortServer::Stop() {
         });
     }
 
-    cv_.notify_one();
     if (serverThread_.joinable()) {
         serverThread_.join();
     }

@@ -4,16 +4,18 @@
 #include "WebRTCServer.hpp"
 
 std::unique_ptr<WebRTC>
-WebRTC::Create(Type type, const std::string& name) {
-    if (type == Type::Server) {
-        return std::make_unique<WebRTCServer>(name);
+WebRTC::Create(const PropertyBag& properties) {
+    std::string messageAddress = properties.Get<std::string>("messageAddress");
+    if (messageAddress.empty()) {
+        return std::make_unique<WebRTCServer>(properties);
     }
 
-    return std::make_unique<WebRTCClient>(name);
+    return std::make_unique<WebRTCClient>(properties);
 }
 
-WebRTC::WebRTC(MessagePort::Type type, const std::string& name)
-    : messagePort_(MessagePort::Create(type, name)) {
+WebRTC::WebRTC(MessagePort::Type type, const PropertyBag& properties)
+    : properties_(properties),
+      messagePort_(MessagePort::Create(type, properties_.Get<std::string>("name"))) {
     messagePort_->OnOpen([this](MessagePort::Ws* ws, const std::string& user) {
         currentWebSocket_ = ws;
         OnMessageOpen(user);
@@ -28,16 +30,15 @@ WebRTC::WebRTC(MessagePort::Type type, const std::string& name)
     });
 }
 
-bool WebRTC::Start(const std::string& address, int port) {
-    return messagePort_->Start(address, port);
+bool WebRTC::Start() {
+    return messagePort_->Start(
+        properties_.Get<std::string>("messageAddress"),
+        properties_.Get<int>("messagePort")
+    );
 }
 
 void WebRTC::Stop() {
     messagePort_->Stop();
-}
-
-bool WebRTC::Wait() {
-    return messagePort_->Wait();
 }
 
 bool WebRTC::IsRunning() {

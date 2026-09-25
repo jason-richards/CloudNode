@@ -5,7 +5,8 @@
 
 class WebRTCClient final : public WebRTC {
 public:
-    explicit WebRTCClient(const std::string& name) : WebRTC(MessagePort::Type::Client, name) {}
+    explicit WebRTCClient(const PropertyBag& properties)
+        : WebRTC(MessagePort::Type::Client, properties) {}
 
     void OnMessageOpen(const std::string& user) override;
     void OnMessageClose(int code, std::string_view message) override;
@@ -20,6 +21,8 @@ protected:
     void OnFileAccept(rapidjson::Document& doc) override;
     void OnFileOffer(rapidjson::Document& doc) override;
     void OnPingPong(rapidjson::Document& doc) override;
+
+private:
 };
 
 #endif // WEBRTC_CLIENT_HPP

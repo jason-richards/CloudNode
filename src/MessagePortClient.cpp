@@ -19,7 +19,6 @@ bool MessagePortClient::Start(const std::string& address, int port) {
         return false;
     }
 
-    startupFailed_ = false;
     socket_ = std::make_unique<ix::WebSocket>();
     socket_->setUrl(address + ":" + std::to_string(port));
 
@@ -39,7 +38,6 @@ bool MessagePortClient::Start(const std::string& address, int port) {
                 std::lock_guard<std::mutex> lock(mtx_);
                 isRunning_ = true;
             }
-            cv_.notify_one();
             if (openCallback_) {
                 openCallback_(nullptr, name_);
             }
@@ -54,9 +52,7 @@ bool MessagePortClient::Start(const std::string& address, int port) {
             {
                 std::lock_guard<std::mutex> lock(mtx_);
                 isRunning_ = false;
-                startupFailed_ = true;
             }
-            cv_.notify_one();
             if (closeCallback_) {
                 closeCallback_(nullptr, msg->closeInfo.code, msg->closeInfo.reason);
             }
@@ -66,9 +62,7 @@ bool MessagePortClient::Start(const std::string& address, int port) {
             {
                 std::lock_guard<std::mutex> lock(mtx_);
                 isRunning_ = false;
-                startupFailed_ = true;
             }
-            cv_.notify_one();
             break;
         };
     });
@@ -92,9 +86,7 @@ void MessagePortClient::Stop() {
     {
         std::lock_guard<std::mutex> lock(mtx_);
         isRunning_ = false;
-        startupFailed_ = true;
     }
-    cv_.notify_one();
 
     if (socket_) {
         socket_->stop();
@@ -102,12 +94,6 @@ void MessagePortClient::Stop() {
     if (serverThread_.joinable()) {
         serverThread_.join();
     }
-}
-
-bool MessagePortClient::Wait() {
-    std::unique_lock<std::mutex> lock(mtx_);
-    cv_.wait(lock, [this] { return !isRunning_; });
-    return true;
 }
 
 bool MessagePortClient::IsRunning() {

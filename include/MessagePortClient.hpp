@@ -15,7 +15,6 @@ public:
     bool Start(const std::string& address, int port) override;
     bool Send(const std::string& message) override;
     void Stop() override;
-    bool Wait() override;
     bool IsRunning() override;
 
 private:
