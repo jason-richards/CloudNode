@@ -28,6 +28,14 @@ WebRTCClient::JoinRoom(
 
 
 void
+WebRTCClient::SendPing() {
+    WaitUntilRunning();
+    if (!SendMessage("{ \"type\" : \"ping\" }")) {
+        Logger::error() << "Unable to send ping.";
+    }
+}
+
+void
 WebRTCClient::OnJoin(
     rapidjson::Document& doc
 ) {
@@ -60,12 +68,13 @@ WebRTCClient::OnFileOffer(
 }
 
 void
-WebRTCClient::OnPing(
+WebRTCClient::OnPingPong(
     rapidjson::Document& doc
 ) {
     (void) doc;
-    Logger::info() << "Ping";
+    Logger::info() << "PingPong";
 }
+
 
 void
 WebRTCClient::OnMessageOpen(
@@ -80,7 +89,6 @@ WebRTCClient::OnMessageOpen(
 /**
  * @brief Handles a closed WebSocket connection and removes its room membership.
  *
- * @param ws WebSocket that was closed.
  * @param code WebSocket close code.
  * @param message WebSocket close message.
  */

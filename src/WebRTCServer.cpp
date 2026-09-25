@@ -10,13 +10,12 @@
 
 
 /**
- * @brief Handles the ping command by sending a pong response to the client.
+ * @brief Handles ping and pong commands by sending a pong response to the client.
  *
- * @param ws WebSocket that sent the command.
  * @param doc Parsed command document.
  */
 void
-WebRTCServer::OnPing(
+WebRTCServer::OnPingPong(
     rapidjson::Document& doc
 ) {
     (void) doc;
@@ -57,7 +56,6 @@ WebRTCServer::SendJoinNotification(
 /**
  * @brief Handles a join command and adds the client to the requested room.
  *
- * @param ws WebSocket that sent the command.
  * @param doc Parsed command document containing the room identifier.
  */
 void
@@ -119,7 +117,6 @@ WebRTCServer::SendLeaveNotification(
 /**
  * @brief Removes a client from a room and notifies the remaining members.
  *
- * @param ws WebSocket associated with the departing client.
  * @param user Identifier of the departing client.
  * @param room Room from which the client is leaving.
  */
@@ -150,7 +147,6 @@ WebRTCServer::Leave(
 /**
  * @brief Handles a leave command received from a client.
  *
- * @param ws WebSocket that sent the command.
  * @param doc Parsed command document containing the room identifier.
  */
 void
@@ -178,7 +174,6 @@ WebRTCServer::OnLeave(
  * The sender and recipient must both belong to the requested room. The
  * forwarded document replaces the recipient field with the sender identifier.
  *
- * @param ws WebSocket that sent the command.
  * @param doc Parsed file command document.
  * @param file File metadata extracted from the command.
  */
@@ -233,7 +228,6 @@ WebRTCServer::HandleFile(
 /**
  * @brief Handles a file offer and forwards it to the requested recipient.
  *
- * @param ws WebSocket that sent the command.
  * @param doc Parsed file offer document.
  */
 void
@@ -267,7 +261,6 @@ WebRTCServer::OnFileOffer(
 /**
  * @brief Handles acceptance of a file offer and forwards it to the sender.
  *
- * @param ws WebSocket that sent the command.
  * @param doc Parsed file acceptance document.
  */
 void
@@ -295,7 +288,6 @@ WebRTCServer::OnFileAccept(
 /**
  * @brief Handles a newly opened WebSocket connection.
  *
- * @param ws WebSocket for the new connection.
  * @param user Identifier associated with the connection.
  */
 void
@@ -310,7 +302,6 @@ WebRTCServer::OnMessageOpen(
 /**
  * @brief Handles a closed WebSocket connection and removes its room membership.
  *
- * @param ws WebSocket that was closed.
  * @param code WebSocket close code.
  * @param message WebSocket close message.
  */

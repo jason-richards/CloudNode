@@ -46,8 +46,10 @@ public:
         std::string type = doc["type"].GetString();
         switch (string_hash(type)) {
             case string_hash("join"):
+            case string_hash("peer_joined"):
                 OnJoin(doc);
                 break;
+            case string_hash("peer_left"):
             case string_hash("leave"):
                 OnLeave(doc);
                 break;
@@ -58,7 +60,8 @@ public:
                 OnFileOffer(doc);
                 break;
             case string_hash("ping"):
-                OnPing(doc);
+            case string_hash("pong"):
+                OnPingPong(doc);
                 break;
         }
     }
@@ -74,7 +77,7 @@ protected:
     virtual void OnLeave(rapidjson::Document& doc) = 0;
     virtual void OnFileAccept(rapidjson::Document& doc) = 0;
     virtual void OnFileOffer(rapidjson::Document& doc) = 0;
-    virtual void OnPing(rapidjson::Document& doc) = 0;
+    virtual void OnPingPong(rapidjson::Document& doc) = 0;
 
     bool SendMessage(const std::string& message) { return messagePort_->Send(message); }
     bool WaitUntilRunning() { return messagePort_->WaitUntilRunning(); }

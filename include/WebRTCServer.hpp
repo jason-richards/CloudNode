@@ -20,7 +20,7 @@ protected:
     void OnLeave(rapidjson::Document& doc) override;
     void OnFileAccept(rapidjson::Document& doc) override;
     void OnFileOffer(rapidjson::Document& doc) override;
-    void OnPing(rapidjson::Document& doc) override;
+    void OnPingPong(rapidjson::Document& doc) override;
 
 private:
     struct FileDetails {

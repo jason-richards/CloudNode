@@ -150,7 +150,10 @@ main(
             clientRTC->JoinRoom(params.r());
         }
         while (!StopRequested(g_stopToken)) {
-            std::this_thread::sleep_for(std::chrono::seconds(3));
+            if (auto clientRTC = dynamic_cast<WebRTCClient*>(webRTC.get())) {
+                clientRTC->SendPing();
+            }
+            std::this_thread::sleep_for(std::chrono::seconds(5));
         }
         webRTC->Stop();
     }

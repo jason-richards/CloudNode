@@ -45,7 +45,6 @@ bool MessagePortClient::Start(const std::string& address, int port) {
             }
             break;
         case ix::WebSocketMessageType::Message:
-            Logger::info() << "ix::WebSocketMessageType::Message";
             if (messageCallback_) {
                 messageCallback_(nullptr, msg->str);
             }

@@ -11,6 +11,7 @@ public:
     void OnMessageClose(int code, std::string_view message) override;
 
     void JoinRoom(const std::string& room);
+    void SendPing();
 
 protected:
 
@@ -18,7 +19,7 @@ protected:
     void OnLeave(rapidjson::Document& doc) override;
     void OnFileAccept(rapidjson::Document& doc) override;
     void OnFileOffer(rapidjson::Document& doc) override;
-    void OnPing(rapidjson::Document& doc) override;
+    void OnPingPong(rapidjson::Document& doc) override;
 };
 
 #endif // WEBRTC_CLIENT_HPP
