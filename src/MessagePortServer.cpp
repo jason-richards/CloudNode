@@ -24,6 +24,7 @@ bool MessagePortServer::Start(const std::string& address, int port) {
         return false;
     }
 
+    startupFailed_ = false;
     serverThread_ = std::thread([this, port]() {
         uWS::App()
             .ws<PerSocketData>("/*", {
@@ -71,6 +72,7 @@ bool MessagePortServer::Start(const std::string& address, int port) {
                     {
                         std::lock_guard<std::mutex> lock(mtx_);
                         isRunning_ = false;
+                        startupFailed_ = true;
                     }
                     cv_.notify_one();
                 }
@@ -93,17 +95,28 @@ bool MessagePortServer::Wait() {
 }
 
 void MessagePortServer::Stop() {
-    std::unique_lock<std::mutex> lock(mtx_);
-    if (!isRunning_) {
-        return;
+    uWS::Loop* loop = nullptr;
+    us_listen_socket_t* listenSocket = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(mtx_);
+        if (!isRunning_ && !serverThread_.joinable()) {
+            return;
+        }
+
+        isRunning_ = false;
+        startupFailed_ = true;
+        loop = loop_;
+        listenSocket = listenSocket_;
     }
 
-    isRunning_ = false;
-    if (loop_ && listenSocket_) {
-        loop_->defer([this]() {
-            if (listenSocket_) {
-                us_listen_socket_close(0, listenSocket_);
-                listenSocket_ = nullptr;
+    if (loop && listenSocket) {
+        loop->defer([this, listenSocket]() {
+            us_listen_socket_close(0, listenSocket);
+            {
+                std::lock_guard<std::mutex> lock(mtx_);
+                if (listenSocket_ == listenSocket) {
+                    listenSocket_ = nullptr;
+                }
             }
         });
     }

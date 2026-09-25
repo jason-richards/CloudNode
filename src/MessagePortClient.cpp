@@ -64,7 +64,11 @@ bool MessagePortClient::Start(const std::string& address, int port) {
             break;
         case ix::WebSocketMessageType::Error:
             Logger::info() << "ix::WebSocketMessageType::Error";
-            startupFailed_ = true;
+            {
+                std::lock_guard<std::mutex> lock(mtx_);
+                isRunning_ = false;
+                startupFailed_ = true;
+            }
             cv_.notify_one();
             break;
         };
