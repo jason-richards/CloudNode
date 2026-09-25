@@ -9,55 +9,93 @@ void MessagePortClient::OnClose(CloseCallback callback) {
     closeCallback_ = std::move(callback);
 }
 
-void MessagePortClient::OnOpen(MessageCallback callback) {
+void MessagePortClient::OnOpen(OpenCallback callback) {
     openCallback_ = std::move(callback);
 }
 
-bool MessagePortClient::Start(int port) {
-    (void)port;
-
+bool MessagePortClient::Start(const std::string& address, int port) {
     std::unique_lock<std::mutex> lock(mtx_);
     if (isRunning_) {
         return false;
     }
 
-    isRunning_ = true;
+    startupFailed_ = false;
     socket_ = std::make_unique<ix::WebSocket>();
-    socket_->setUrl("ws://localhost:8080");
+    socket_->setUrl(address + ":" + std::to_string(port));
 
     ix::WebSocketHttpHeaders headers;
-    headers["x-client-id"] = "CowDog82";
+    headers["x-client-id"] = name_;
     socket_->setExtraHeaders(headers);
 
     socket_->setOnMessageCallback([this](const ix::WebSocketMessagePtr& msg) {
-        if (!msg || msg->type != ix::WebSocketMessageType::Message) {
+        if (!msg) {
             return;
         }
 
-        if (messageCallback_) {
-            messageCallback_(nullptr, msg->str);
-        }
+        switch (msg->type) {
+        case ix::WebSocketMessageType::Open:
+            Logger::info() << "ix::WebSocketMessageType::Open";
+            {
+                std::lock_guard<std::mutex> lock(mtx_);
+                isRunning_ = true;
+            }
+            cv_.notify_one();
+            if (openCallback_) {
+                openCallback_(nullptr, name_);
+            }
+            break;
+        case ix::WebSocketMessageType::Message:
+            Logger::info() << "ix::WebSocketMessageType::Message";
+            if (messageCallback_) {
+                messageCallback_(nullptr, msg->str);
+            }
+            break;
+        case ix::WebSocketMessageType::Close:
+            Logger::info() << "ix::WebSocketMessageType::Close";
+            {
+                std::lock_guard<std::mutex> lock(mtx_);
+                isRunning_ = false;
+                startupFailed_ = true;
+            }
+            cv_.notify_one();
+            if (closeCallback_) {
+                closeCallback_(nullptr, msg->closeInfo.code, msg->closeInfo.reason);
+            }
+            break;
+        case ix::WebSocketMessageType::Error:
+            Logger::info() << "ix::WebSocketMessageType::Error";
+            startupFailed_ = true;
+            cv_.notify_one();
+            break;
+        };
     });
 
     serverThread_ = std::thread([this]() {
         socket_->start();
     });
 
-    cv_.notify_one();
     return true;
 }
 
-void MessagePortClient::Stop() {
-    std::unique_lock<std::mutex> lock(mtx_);
-    if (!isRunning_) {
-        return;
+bool MessagePortClient::Send(const std::string& message) {
+    if (!socket_) {
+        return false;
     }
 
-    isRunning_ = false;
+    return socket_->send(message).success;
+}
+
+void MessagePortClient::Stop() {
+    {
+        std::lock_guard<std::mutex> lock(mtx_);
+        isRunning_ = false;
+        startupFailed_ = true;
+    }
+    cv_.notify_one();
+
     if (socket_) {
         socket_->stop();
     }
-    cv_.notify_one();
     if (serverThread_.joinable()) {
         serverThread_.join();
     }

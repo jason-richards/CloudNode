@@ -4,10 +4,10 @@
 #include "MessagePortServer.hpp"
 
 std::unique_ptr<MessagePort>
-MessagePort::Create(Type type) {
+MessagePort::Create(Type type, const std::string& name) {
     if (type == Type::Server) {
-        return std::make_unique<MessagePortServer>();
+        return std::make_unique<MessagePortServer>(name);
     }
 
-    return std::make_unique<MessagePortClient>();
+    return std::make_unique<MessagePortClient>(name);
 }

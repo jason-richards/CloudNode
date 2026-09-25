@@ -14,17 +14,16 @@ void MessagePortServer::OnClose(CloseCallback callback) {
     closeCallback_ = std::move(callback);
 }
 
-void MessagePortServer::OnOpen(MessageCallback callback) {
+void MessagePortServer::OnOpen(OpenCallback callback) {
     openCallback_ = std::move(callback);
 }
 
-bool MessagePortServer::Start(int port) {
+bool MessagePortServer::Start(const std::string& address, int port) {
     std::unique_lock<std::mutex> lock(mtx_);
     if (isRunning_) {
         return false;
     }
 
-    isRunning_ = true;
     serverThread_ = std::thread([this, port]() {
         uWS::App()
             .ws<PerSocketData>("/*", {
@@ -79,7 +78,12 @@ bool MessagePortServer::Start(int port) {
             .run();
     });
 
-    return isRunning_;
+    return true;
+}
+
+bool MessagePortServer::Send(const std::string& message) {
+    (void) message;
+    return false;
 }
 
 bool MessagePortServer::Wait() {

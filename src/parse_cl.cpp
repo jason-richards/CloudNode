@@ -50,9 +50,11 @@ Cmdline::Cmdline (int argc, char *argv[])
   _program_name += argv[0];
 
   /* default values */
+  //_messageAddress = "ws://localhost";
   _messagePort = 8080;
   _stunAddress = "stun.l.google.com";
   _stunPort = 19302;
+  _r = "DefaultRoom#1";
   _h = false;
   _v = false;
 

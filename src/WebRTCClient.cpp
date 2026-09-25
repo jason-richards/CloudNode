@@ -1,52 +1,78 @@
 #include "WebRTCClient.hpp"
 #include "Logger.hpp"
 
+#include "rapidjson/stringbuffer.h"
+#include "rapidjson/writer.h"
+
+
 void
-WebRTCClient::Join(
-    MessagePort::Ws * ws,
+WebRTCClient::JoinRoom(
+    const std::string& room
+) {
+    WaitUntilRunning();
+
+    rapidjson::Document doc;
+    doc.SetObject();
+    auto& allocator = doc.GetAllocator();
+    doc.AddMember("type", rapidjson::Value("join", allocator), allocator);
+    doc.AddMember("room", rapidjson::Value(room.c_str(), allocator), allocator);
+
+    rapidjson::StringBuffer buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    doc.Accept(writer);
+
+    if (!SendMessage(buffer.GetString())) {
+        Logger::error() << "Unable to send join request for room '" << room << "'.";
+    }
+}
+
+
+void
+WebRTCClient::OnJoin(
     rapidjson::Document& doc
 ) {
+    (void) doc;
     Logger::info() << "Join";
 }
 
 void
-WebRTCClient::Leave(
-    MessagePort::Ws * ws,
+WebRTCClient::OnLeave(
     rapidjson::Document& doc
 ) {
+    (void) doc;
     Logger::info() << "Leave";
 }
 
 void
-WebRTCClient::FileAccept(
-    MessagePort::Ws * ws,
+WebRTCClient::OnFileAccept(
     rapidjson::Document& doc
 ) {
+    (void) doc;
     Logger::info() << "FileAccept";
 }
 
 void
-WebRTCClient::FileOffer(
-    MessagePort::Ws * ws,
+WebRTCClient::OnFileOffer(
     rapidjson::Document& doc
 ) {
+    (void) doc;
     Logger::info() << "FileOffer";
 }
 
 void
-WebRTCClient::Ping(
-    MessagePort::Ws * ws,
+WebRTCClient::OnPing(
     rapidjson::Document& doc
 ) {
+    (void) doc;
     Logger::info() << "Ping";
 }
 
 void
-WebRTCClient::MessageOpen(
-    MessagePort::Ws * ws,
+WebRTCClient::OnMessageOpen(
     const std::string& user
 ) {
-    Logger::info() << "MessageOpen";
+    (void) user;
+    Logger::info() << "MessagePort Opened.";
 }
 
 
@@ -59,9 +85,11 @@ WebRTCClient::MessageOpen(
  * @param message WebSocket close message.
  */
 void
-WebRTCClient::MessageClose(
-    MessagePort::Ws * ws,
+WebRTCClient::OnMessageClose(
     int code,
     std::string_view message
 ) {
+    (void) code;
+    (void) message;
+    Logger::info() << "MessagePort Closed.";
 }

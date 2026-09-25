@@ -18,7 +18,8 @@ public:
     };
 
     using Ws = uWS::WebSocket<false, true, PerSocketData>;
-    using MessageCallback = std::function<void(Ws*, const std::string&)>;
+    using MessageCallback = std::function<void(Ws* /*ws*/, const std::string&)>;
+    using OpenCallback = std::function<void(Ws* /*ws*/, const std::string&)>;
     using CloseCallback = std::function<void(Ws*, int, std::string_view)>;
 
     enum class Type {
@@ -31,25 +32,35 @@ public:
     MessagePort(const MessagePort&) = delete;
     MessagePort& operator=(const MessagePort&) = delete;
 
-    static std::unique_ptr<MessagePort> Create(Type type);
+    static std::unique_ptr<MessagePort> Create(Type type, const std::string& name);
 
     virtual void OnMessage(MessageCallback callback) = 0;
     virtual void OnClose(CloseCallback callback) = 0;
-    virtual void OnOpen(MessageCallback callback) = 0;
-    virtual bool Start(int port) = 0;
+    virtual void OnOpen(OpenCallback callback) = 0;
+    virtual bool Start(const std::string& address, int port) = 0;
+    virtual bool Send(const std::string& message) = 0;
+    bool WaitUntilRunning() {
+        std::unique_lock<std::mutex> lock(mtx_);
+        cv_.wait(lock, [this] {
+            return isRunning_.load() || startupFailed_.load();
+        });
+        return isRunning_.load();
+    }
     virtual void Stop() = 0;
     virtual bool Wait() = 0;
     virtual bool IsRunning() = 0;
 
 protected:
-    MessagePort() = default;
+    MessagePort(const std::string& name) : name_(name) {};
     MessageCallback messageCallback_;
     CloseCallback closeCallback_;
-    MessageCallback openCallback_;
+    OpenCallback openCallback_;
     std::thread serverThread_;
     std::atomic<bool> isRunning_{false};
+    std::atomic<bool> startupFailed_{false};
     std::mutex mtx_;
     std::condition_variable cv_;
+    std::string name_;
 };
 
 #endif // CONTROL_PORT_HPP

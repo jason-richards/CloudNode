@@ -7,10 +7,13 @@
 
 class MessagePortClient final : public MessagePort {
 public:
+    explicit MessagePortClient(const std::string& name) : MessagePort(name) {}
+
     void OnMessage(MessageCallback callback) override;
     void OnClose(CloseCallback callback) override;
-    void OnOpen(MessageCallback callback) override;
-    bool Start(int port) override;
+    void OnOpen(OpenCallback callback) override;
+    bool Start(const std::string& address, int port) override;
+    bool Send(const std::string& message) override;
     void Stop() override;
     bool Wait() override;
     bool IsRunning() override;

@@ -10,9 +10,8 @@
 #include "parse_cl.h"
 #include "RandomName.hpp"
 #include "LocalDescription.hpp"
-#include "MessagePort.hpp"
 #include "WebRTC.hpp"
-#include "WebRTCServer.hpp"
+#include "WebRTCClient.hpp"
 #include "Logger.hpp"
 #include "StopToken.hpp"
 
@@ -137,7 +136,8 @@ main(
     bool isServer = params.messageAddress().empty();
 
     auto webRTC = WebRTC::Create(
-        isServer ? WebRTC::Type::Server : WebRTC::Type::Client
+        isServer ? WebRTC::Type::Server : WebRTC::Type::Client,
+        name
     );
 
     Logger::info()
@@ -145,28 +145,16 @@ main(
         << (isServer ? " SERVER " : " CLIENT ")
         << "mode.";
 
-    auto message = MessagePort::Create(
-        isServer ? MessagePort::Type::Server : MessagePort::Type::Client
-    );
-
-    message->OnOpen([webRTC = webRTC.get()](MessagePort::Ws * ws, const std::string& user) {
-        webRTC->MessageOpen(ws, user);
-    });
-
-    message->OnClose([webRTC = webRTC.get()](MessagePort::Ws * ws, int code, std::string_view message) {
-        webRTC->MessageClose(ws, code, message);
-    });
-
-    message->OnMessage([webRTC = webRTC.get()](MessagePort::Ws * ws, const std::string& message) {
-        webRTC->MessageRouter(ws, message);
-    });
-
-    if (message->Start(params.messagePort())) {
+    if (webRTC->Start(params.messageAddress(), params.messagePort())) {
+        if (auto clientRTC = dynamic_cast<WebRTCClient*>(webRTC.get())) {
+            clientRTC->JoinRoom(params.r());
+        }
         while (!StopRequested(g_stopToken)) {
             std::this_thread::sleep_for(std::chrono::seconds(3));
         }
-        message->Stop();
+        webRTC->Stop();
     }
 
     return 0;
 }
+

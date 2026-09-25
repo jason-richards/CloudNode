@@ -9,16 +9,18 @@
 
 class WebRTCServer final : public WebRTC {
 public:
-    void MessageOpen(MessagePort::Ws * ws, const std::string& user) override;
-    void MessageClose(MessagePort::Ws * ws, int code, std::string_view message) override;
+    explicit WebRTCServer(const std::string& name) : WebRTC(MessagePort::Type::Server, name) {}
+
+    void OnMessageOpen(const std::string& user) override;
+    void OnMessageClose(int code, std::string_view message) override;
 
 protected:
 
-    void Join(MessagePort::Ws * ws, rapidjson::Document& doc) override;
-    void Leave(MessagePort::Ws * ws, rapidjson::Document& doc) override;
-    void FileAccept(MessagePort::Ws * ws, rapidjson::Document& doc) override;
-    void FileOffer(MessagePort::Ws * ws, rapidjson::Document& doc) override;
-    void Ping(MessagePort::Ws * ws, rapidjson::Document& doc) override;
+    void OnJoin(rapidjson::Document& doc) override;
+    void OnLeave(rapidjson::Document& doc) override;
+    void OnFileAccept(rapidjson::Document& doc) override;
+    void OnFileOffer(rapidjson::Document& doc) override;
+    void OnPing(rapidjson::Document& doc) override;
 
 private:
     struct FileDetails {
@@ -29,8 +31,8 @@ private:
 
     void SendJoinNotification(const std::string& whoToNotify, const std::string& whoJoined);
     void SendLeaveNotification(const std::string& whoToNotify, const std::string& whoLeft);
-    void Leave(MessagePort::Ws * ws, const std::string& user, const std::string& room);
-    void HandleFile(MessagePort::Ws * ws, rapidjson::Document& doc, FileDetails& file);
+    void Leave(const std::string& user, const std::string& room);
+    void HandleFile(rapidjson::Document& doc, FileDetails& file);
 
     std::map<std::string, MessagePort::Ws*> clientDB_;
     std::map<std::string, std::string> pendingOffers_;

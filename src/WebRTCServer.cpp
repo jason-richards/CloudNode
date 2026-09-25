@@ -16,11 +16,14 @@
  * @param doc Parsed command document.
  */
 void
-WebRTCServer::Ping(
-    MessagePort::Ws * ws,
+WebRTCServer::OnPing(
     rapidjson::Document& doc
 ) {
     (void) doc;
+    auto ws = CurrentWebSocket();
+    if (!ws) {
+        return;
+    }
     auto user = ws->getUserData()->x_client_id;
     Logger::info() << "\'" << user << "\' sent \'ping\'; sending \'pong\'.";
     ws->send("{\"type\" : \"pong\", \"id\" : \"" + user + "\"}");
@@ -58,10 +61,13 @@ WebRTCServer::SendJoinNotification(
  * @param doc Parsed command document containing the room identifier.
  */
 void
-WebRTCServer::Join(
-    MessagePort::Ws * ws,
+WebRTCServer::OnJoin(
     rapidjson::Document& doc
 ) {
+    auto ws = CurrentWebSocket();
+    if (!ws) {
+        return;
+    }
     auto user = ws->getUserData()->x_client_id;
     if (!doc.HasMember("room") || !doc["room"].IsString()) {
         Logger::warn() << "Join command with no room specification.";
@@ -119,11 +125,9 @@ WebRTCServer::SendLeaveNotification(
  */
 void
 WebRTCServer::Leave(
-    MessagePort::Ws * ws,
     const std::string& user,
     const std::string& room
 ) {
-    (void) ws;
     if (rooms_.find(room) == rooms_.end()) {
         Logger::warn() << "Room \'" << room << "\', does not exist.";
         return;
@@ -150,17 +154,20 @@ WebRTCServer::Leave(
  * @param doc Parsed command document containing the room identifier.
  */
 void
-WebRTCServer::Leave(
-    MessagePort::Ws * ws,
+WebRTCServer::OnLeave(
     rapidjson::Document& doc
 ) {
+    auto ws = CurrentWebSocket();
+    if (!ws) {
+        return;
+    }
     auto user = ws->getUserData()->x_client_id;
     if (!doc.HasMember("room") || !doc["room"].IsString()) {
         Logger::warn() << "leave command with no room specification.";
         return;
     }
 
-    Leave(ws, user, doc["room"].GetString());
+    Leave(user, doc["room"].GetString());
 }
 
 
@@ -177,7 +184,6 @@ WebRTCServer::Leave(
  */
 void
 WebRTCServer::HandleFile(
-    MessagePort::Ws * ws,
     rapidjson::Document& doc,
     FileDetails& file
 ) {
@@ -189,6 +195,10 @@ WebRTCServer::HandleFile(
         return;
     }
 
+    auto ws = CurrentWebSocket();
+    if (!ws) {
+        return;
+    }
     std::string fromId = ws->getUserData()->x_client_id;
     std::string toId = doc["to"].GetString();
     std::string room = doc["room"].GetString();
@@ -227,8 +237,7 @@ WebRTCServer::HandleFile(
  * @param doc Parsed file offer document.
  */
 void
-WebRTCServer::FileOffer(
-    MessagePort::Ws * ws,
+WebRTCServer::OnFileOffer(
     rapidjson::Document& doc
 ) {
     if (!doc.HasMember("file") || !doc["file"].IsObject() ||
@@ -244,9 +253,13 @@ WebRTCServer::FileOffer(
         static_cast<size_t>(doc["file"]["size"].GetInt64()),
         doc["file"]["mimeType"].GetString()
     };
+    auto ws = CurrentWebSocket();
+    if (!ws) {
+        return;
+    }
     Logger::info() << "File offer from \'" << ws->getUserData()->x_client_id
                    << "\', to \'" << doc["to"].GetString() << "\': " << file.name;
-    HandleFile(ws, doc, file);
+    HandleFile(doc, file);
 }
 
 
@@ -258,8 +271,7 @@ WebRTCServer::FileOffer(
  * @param doc Parsed file acceptance document.
  */
 void
-WebRTCServer::FileAccept(
-    MessagePort::Ws * ws,
+WebRTCServer::OnFileAccept(
     rapidjson::Document& doc
 ) {
     if (!doc.HasMember("file") || !doc["file"].IsObject() ||
@@ -269,9 +281,13 @@ WebRTCServer::FileAccept(
     }
 
     FileDetails file{doc["file"]["name"].GetString(), 0, ""};
+    auto ws = CurrentWebSocket();
+    if (!ws) {
+        return;
+    }
     Logger::info() << "File offer accept from \'" << ws->getUserData()->x_client_id
                    << "\', to \'" << doc["to"].GetString() << "\': " << file.name;
-    HandleFile(ws, doc, file);
+    HandleFile(doc, file);
 }
 
 
@@ -283,11 +299,9 @@ WebRTCServer::FileAccept(
  * @param user Identifier associated with the connection.
  */
 void
-WebRTCServer::MessageOpen(
-    MessagePort::Ws * ws,
+WebRTCServer::OnMessageOpen(
     const std::string& user
 ) {
-    (void) ws;
     Logger::info() << "\'" << user << "\' connected.";
 }
 
@@ -301,18 +315,21 @@ WebRTCServer::MessageOpen(
  * @param message WebSocket close message.
  */
 void
-WebRTCServer::MessageClose(
-    MessagePort::Ws * ws,
+WebRTCServer::OnMessageClose(
     int code,
     std::string_view message
 ) {
     (void) code;
     (void) message;
+    auto ws = CurrentWebSocket();
+    if (!ws) {
+        return;
+    }
     auto user = ws->getUserData()->x_client_id;
     Logger::info() << "\'" << user << "\' has closed connection.";
     for (const auto& [key, value] : rooms_) {
         if (std::find(rooms_[key].begin(), rooms_[key].end(), user) != rooms_[key].end()) {
-            Leave(ws, user, key);
+            Leave(user, key);
         }
     }
 }

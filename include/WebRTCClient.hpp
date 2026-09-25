@@ -5,16 +5,20 @@
 
 class WebRTCClient final : public WebRTC {
 public:
-    void MessageOpen(MessagePort::Ws * ws, const std::string& user) override;
-    void MessageClose(MessagePort::Ws * ws, int code, std::string_view message) override;
+    explicit WebRTCClient(const std::string& name) : WebRTC(MessagePort::Type::Client, name) {}
+
+    void OnMessageOpen(const std::string& user) override;
+    void OnMessageClose(int code, std::string_view message) override;
+
+    void JoinRoom(const std::string& room);
 
 protected:
 
-    void Join(MessagePort::Ws * ws, rapidjson::Document& doc) override;
-    void Leave(MessagePort::Ws * ws, rapidjson::Document& doc) override;
-    void FileAccept(MessagePort::Ws * ws, rapidjson::Document& doc) override;
-    void FileOffer(MessagePort::Ws * ws, rapidjson::Document& doc) override;
-    void Ping(MessagePort::Ws * ws, rapidjson::Document& doc) override;
+    void OnJoin(rapidjson::Document& doc) override;
+    void OnLeave(rapidjson::Document& doc) override;
+    void OnFileAccept(rapidjson::Document& doc) override;
+    void OnFileOffer(rapidjson::Document& doc) override;
+    void OnPing(rapidjson::Document& doc) override;
 };
 
 #endif // WEBRTC_CLIENT_HPP
