@@ -5,8 +5,7 @@
 
 std::unique_ptr<WebRTC>
 WebRTC::Create(const PropertyBag& properties) {
-    std::string messageAddress = properties.Get<std::string>("messageAddress");
-    if (messageAddress.empty()) {
+    if (properties.Get<bool>("server")) {
         return std::make_unique<WebRTCServer>(properties);
     }
 

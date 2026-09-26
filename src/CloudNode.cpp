@@ -10,7 +10,7 @@
 #include "parse_cl.h"
 #include "RandomName.hpp"
 #include "LocalDescription.hpp"
-#include "WebRTC.hpp"
+#include "WebRTCServer.hpp"
 #include "Logger.hpp"
 #include "StopToken.hpp"
 
@@ -102,6 +102,9 @@ main(
 ) {
     struct sigaction newHandler, oldHandler;
 
+    g_stopToken = CreateStopToken();
+    Start(g_stopToken);
+
     memset(&newHandler, 0, sizeof newHandler);
     memset(&oldHandler, 0, sizeof oldHandler);
     newHandler.sa_sigaction = signalHandler;
@@ -109,8 +112,6 @@ main(
 
     sigaction(SIGINT, &newHandler, &oldHandler);
 
-    g_stopToken = CreateStopToken();
-    Start(g_stopToken);
 
     rtc::Configuration config;
     Cmdline params(argc, argv);
@@ -135,6 +136,7 @@ main(
     properties.Set("messagePort", params.messagePort());
     properties.Set("stunAddress", params.stunAddress());
     properties.Set("stunPort", params.stunPort());
+    properties.Set("server", params.s());
     properties.Set("n", params.n());
     properties.Set("d", params.d());
     properties.Set("r", params.r());
@@ -145,9 +147,9 @@ main(
 
     Logger::info() << "'" << name << "' is coming online.";
 
-    bool isServer = params.messageAddress().empty();
-
     auto webRTC = WebRTC::Create(properties);
+
+    bool isServer = dynamic_cast<WebRTCServer*>(webRTC.get()) != nullptr ? true : false;
 
     Logger::info()
         << "Running in"

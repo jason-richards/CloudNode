@@ -2,7 +2,7 @@
 **
 ** parse_cl.cpp
 **
-** Tue Sep 22 05:47:18 2026
+** Fri Sep 25 22:31:58 2026
 ** Linux 6.8.0-51-generic (#52-Ubuntu SMP PREEMPT_DYNAMIC Thu Dec  5 13:09:44 UTC 2024) x86_64
 ** jrichard@SpinRun42 (Jason Richards)
 **
@@ -34,12 +34,13 @@ Cmdline::Cmdline (int argc, char *argv[])
 
   static struct option long_options[] =
   {
+    {"server", no_argument, NULL, 's'},
     {"messageAddress", required_argument, NULL, 256},
     {"messagePort", required_argument, NULL, 257},
     {"stunAddress", required_argument, NULL, 258},
     {"stunPort", required_argument, NULL, 259},
     {"name", required_argument, NULL, 'n'},
-    {"destination", required_argument, NULL, 'd'},
+    {"directory", required_argument, NULL, 'd'},
     {"room", required_argument, NULL, 'r'},
     {"file", required_argument, NULL, 'f'},
     {"help", no_argument, NULL, 'h'},
@@ -50,7 +51,8 @@ Cmdline::Cmdline (int argc, char *argv[])
   _program_name += argv[0];
 
   /* default values */
-  //_messageAddress = "ws://localhost";
+  _s = false;
+  _messageAddress = "ws://localhost";
   _messagePort = 8080;
   _stunAddress = "stun.l.google.com";
   _stunPort = 19302;
@@ -59,23 +61,27 @@ Cmdline::Cmdline (int argc, char *argv[])
   _v = false;
 
   optind = 0;
-  while ((c = getopt_long (argc, argv, "n:d:r:f:hv", long_options, &optind)) != - 1)
+  while ((c = getopt_long (argc, argv, "sn:d:r:f:hv", long_options, &optind)) != - 1)
     {
       switch (c)
         {
-        case 256:
+        case 's': 
+          _s = true;
+          break;
+
+        case 256: 
           _messageAddress = optarg;
           break;
 
-        case 257:
+        case 257: 
           _messagePort = atoi (optarg);
           break;
 
-        case 258:
+        case 258: 
           _stunAddress = optarg;
           break;
 
-        case 259:
+        case 259: 
           _stunPort = atoi (optarg);
           break;
 
@@ -129,15 +135,25 @@ void Cmdline::usage (int status)
     {
       std::cout << "\
 usage: " << _program_name << " [options]\n\
-Cloud server client configuration.\n\
-  [ --messageAddress ] (type=STRING)\n\
-  [ --messagePort ] (type=INTEGER, default=8080)\n\
+WebRTC file transfer client/server.\n\
+   [ -s ] [ --server ] (type=FLAG)\n\
+          start in server mode\n\
+   [ --messageAddress ] (type=STRING)\n\
+          message server hostname or IP address\n\
+   [ --messagePort ] (type=INTEGER, default=8080)\n\
+          message server port\n\
    [ --stunAddress ] (type=STRING, default=stun.l.google.com)\n\
+          STUN server hostname or IP address\n\
    [ --stunPort ] (type=INTEGER, default=19302)\n\
+          STUN server port\n\
    [ -n ] [ --name ] (type=STRING)\n\
-   [ -d ] [ --destination ] (type=STRING)\n\
+          client name\n\
+   [ -d ] [ --directory ] (type=STRING)\n\
+          directory containing files\n\
    [ -r ] [ --room ] (type=STRING)\n\
+          message room name\n\
    [ -f ] [ --file ] (type=STRING)\n\
+          file to transfer\n\
    [ -h ] [ --help ] (type=FLAG)\n\
           Display this help and exit.\n\
    [ -v ] [ --version ] (type=FLAG)\n\
