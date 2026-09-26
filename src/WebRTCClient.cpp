@@ -4,7 +4,25 @@
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 
+/**
+ * @file WebRTCClient.cpp
+ * @brief Client-side WebRTC messaging implementation.
+ *
+ * This file contains the logic used by a WebRTC client to connect to a message
+ * relay, join a room, send keepalive pings, and handle server-side protocol
+ * notifications such as join, leave, file-transfer events, and ping responses.
+ */
 
+/**
+ * @brief Sends a room-join request to the message server.
+ *
+ * The request is encoded as a JSON object with the following shape:
+ * @code
+ * { "type": "join", "room": "<room-id>" }
+ * @endcode
+ *
+ * @param room Identifier of the room to join.
+ */
 void
 WebRTCClient::JoinRoom(
     const std::string& room
@@ -25,6 +43,12 @@ WebRTCClient::JoinRoom(
 }
 
 
+/**
+ * @brief Sends a lightweight keepalive ping to the message server.
+ *
+ * The ping payload is intentionally minimal and is used to verify that the
+ * connection remains alive.
+ */
 void
 WebRTCClient::SendPing() {
     if (!SendMessage("{ \"type\" : \"ping\" }")) {
@@ -32,6 +56,11 @@ WebRTCClient::SendPing() {
     }
 }
 
+/**
+ * @brief Handles a server join event.
+ *
+ * @param doc JSON payload received for the join event.
+ */
 void
 WebRTCClient::OnJoin(
     rapidjson::Document& doc
@@ -40,6 +69,11 @@ WebRTCClient::OnJoin(
     Logger::info() << "Join";
 }
 
+/**
+ * @brief Handles a server leave event.
+ *
+ * @param doc JSON payload received for the leave event.
+ */
 void
 WebRTCClient::OnLeave(
     rapidjson::Document& doc
@@ -48,6 +82,11 @@ WebRTCClient::OnLeave(
     Logger::info() << "Leave";
 }
 
+/**
+ * @brief Handles a file-accept notification.
+ *
+ * @param doc JSON payload describing the accepted file transfer.
+ */
 void
 WebRTCClient::OnFileAccept(
     rapidjson::Document& doc
@@ -56,6 +95,11 @@ WebRTCClient::OnFileAccept(
     Logger::info() << "FileAccept";
 }
 
+/**
+ * @brief Handles a file-offer event.
+ *
+ * @param doc JSON payload containing the offered file metadata.
+ */
 void
 WebRTCClient::OnFileOffer(
     rapidjson::Document& doc
@@ -64,6 +108,11 @@ WebRTCClient::OnFileOffer(
     Logger::info() << "FileOffer";
 }
 
+/**
+ * @brief Handles a ping/pong response from the message server.
+ *
+ * @param doc JSON payload returned by the remote peer or relay.
+ */
 void
 WebRTCClient::OnPingPong(
     rapidjson::Document& doc
@@ -73,6 +122,14 @@ WebRTCClient::OnPingPong(
 }
 
 
+/**
+ * @brief Called when the underlying message transport has opened.
+ *
+ * On connection establishment, the client immediately joins the configured room
+ * defined in the property bag using the "r" entry.
+ *
+ * @param user Identifier or metadata supplied by the transport.
+ */
 void
 WebRTCClient::OnMessageOpen(
     const std::string& user
@@ -83,10 +140,11 @@ WebRTCClient::OnMessageOpen(
     //SendPing();
 }
 
-
-
 /**
- * @brief Handles a closed WebSocket connection and removes its room membership.
+ * @brief Handles closure of the underlying message transport.
+ *
+ * This callback logs the disconnect event and preserves the client lifecycle
+ * semantics for the WebRTC message channel.
  *
  * @param code WebSocket close code.
  * @param message WebSocket close message.
