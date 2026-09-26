@@ -136,7 +136,7 @@ WebRTCClient::OnMessageOpen(
 ) {
     (void) user;
     Logger::info() << "MessagePort Opened.";
-    JoinRoom(Properties().Get<std::string>("r"));
+    JoinRoom(Properties().Get<std::string>("room"));
     //SendPing();
 }
 
