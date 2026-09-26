@@ -125,8 +125,8 @@ main(
     config.iceServers.emplace_back(stunServer);
 
     std::string name;
-    if (params.n().length()) {
-        name = params.n();
+    if (params.name().length()) {
+        name = params.name();
     } else {
         name = RandomNameGenerator::Generate();
     }
@@ -136,13 +136,12 @@ main(
     properties.Set("messagePort", params.messagePort());
     properties.Set("stunAddress", params.stunAddress());
     properties.Set("stunPort", params.stunPort());
-    properties.Set("server", params.s());
-    properties.Set("n", params.n());
-    properties.Set("d", params.d());
-    properties.Set("r", params.r());
-    properties.Set("f", params.f());
-    properties.Set("h", params.h());
-    properties.Set("v", params.v());
+    properties.Set("server", params.server());
+    properties.Set("directory", params.directory());
+    properties.Set("room", params.room());
+    properties.Set("file", params.file());
+    properties.Set("help", params.help());
+    properties.Set("version", params.version());
     properties.Set("name", name);
 
     Logger::info() << "'" << name << "' is coming online.";

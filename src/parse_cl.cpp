@@ -2,7 +2,7 @@
 **
 ** parse_cl.cpp
 **
-** Fri Sep 25 22:31:58 2026
+** Sat Sep 26 09:32:06 2026
 ** Linux 6.8.0-51-generic (#52-Ubuntu SMP PREEMPT_DYNAMIC Thu Dec  5 13:09:44 UTC 2024) x86_64
 ** jrichard@SpinRun42 (Jason Richards)
 **
@@ -26,7 +26,7 @@
 **
 **--------------------------------------------------------------------------*/
 
-Cmdline::Cmdline (int argc, char *argv[])
+Cmdline::Cmdline (int argc, char *argv[]) 
 {
   extern char *optarg;
   extern int optind;
@@ -51,14 +51,14 @@ Cmdline::Cmdline (int argc, char *argv[])
   _program_name += argv[0];
 
   /* default values */
-  _s = false;
+  _server = false;
   _messageAddress = "ws://localhost";
   _messagePort = 8080;
   _stunAddress = "stun.l.google.com";
   _stunPort = 19302;
-  _r = "DefaultRoom#1";
-  _h = false;
-  _v = false;
+  _room = "DefaultRoom#1";
+  _help = false;
+  _version = false;
 
   optind = 0;
   while ((c = getopt_long (argc, argv, "sn:d:r:f:hv", long_options, &optind)) != - 1)
@@ -66,7 +66,7 @@ Cmdline::Cmdline (int argc, char *argv[])
       switch (c)
         {
         case 's': 
-          _s = true;
+          _server = true;
           break;
 
         case 256: 
@@ -86,28 +86,28 @@ Cmdline::Cmdline (int argc, char *argv[])
           break;
 
         case 'n': 
-          _n = optarg;
+          _name = optarg;
           break;
 
         case 'd': 
-          _d = optarg;
+          _directory = optarg;
           break;
 
         case 'r': 
-          _r = optarg;
+          _room = optarg;
           break;
 
         case 'f': 
-          _f = optarg;
+          _file = optarg;
           break;
 
         case 'h': 
-          _h = true;
+          _help = true;
           this->usage (EXIT_SUCCESS);
           break;
 
         case 'v': 
-          _v = true;
+          _version = true;
           break;
 
         default:
@@ -138,7 +138,7 @@ usage: " << _program_name << " [options]\n\
 WebRTC file transfer client/server.\n\
    [ -s ] [ --server ] (type=FLAG)\n\
           start in server mode\n\
-   [ --messageAddress ] (type=STRING)\n\
+   [ --messageAddress ] (type=STRING, default=ws://localhost)\n\
           message server hostname or IP address\n\
    [ --messagePort ] (type=INTEGER, default=8080)\n\
           message server port\n\
@@ -150,7 +150,7 @@ WebRTC file transfer client/server.\n\
           client name\n\
    [ -d ] [ --directory ] (type=STRING)\n\
           directory containing files\n\
-   [ -r ] [ --room ] (type=STRING)\n\
+   [ -r ] [ --room ] (type=STRING, default=DefaultRoom#1)\n\
           message room name\n\
    [ -f ] [ --file ] (type=STRING)\n\
           file to transfer\n\
