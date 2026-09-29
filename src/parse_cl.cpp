@@ -2,7 +2,7 @@
 **
 ** parse_cl.cpp
 **
-** Sat Sep 26 09:32:06 2026
+** Mon Sep 28 14:18:54 2026
 ** Linux 6.8.0-51-generic (#52-Ubuntu SMP PREEMPT_DYNAMIC Thu Dec  5 13:09:44 UTC 2024) x86_64
 ** jrichard@SpinRun42 (Jason Richards)
 **
@@ -26,7 +26,7 @@
 **
 **--------------------------------------------------------------------------*/
 
-Cmdline::Cmdline (int argc, char *argv[]) 
+Cmdline::Cmdline (int argc, char *argv[])
 {
   extern char *optarg;
   extern int optind;
@@ -40,6 +40,7 @@ Cmdline::Cmdline (int argc, char *argv[])
     {"stunAddress", required_argument, NULL, 258},
     {"stunPort", required_argument, NULL, 259},
     {"name", required_argument, NULL, 'n'},
+    {"peer", required_argument, NULL, 'p'},
     {"directory", required_argument, NULL, 'd'},
     {"room", required_argument, NULL, 'r'},
     {"file", required_argument, NULL, 'f'},
@@ -61,7 +62,7 @@ Cmdline::Cmdline (int argc, char *argv[])
   _version = false;
 
   optind = 0;
-  while ((c = getopt_long (argc, argv, "sn:d:r:f:hv", long_options, &optind)) != - 1)
+  while ((c = getopt_long (argc, argv, "sn:p:d:r:f:hv", long_options, &optind)) != - 1)
     {
       switch (c)
         {
@@ -87,6 +88,10 @@ Cmdline::Cmdline (int argc, char *argv[])
 
         case 'n': 
           _name = optarg;
+          break;
+
+        case 'p': 
+          _peer = optarg;
           break;
 
         case 'd': 
@@ -148,6 +153,8 @@ WebRTC file transfer client/server.\n\
           STUN server port\n\
    [ -n ] [ --name ] (type=STRING)\n\
           client name\n\
+   [ -p ] [ --peer ] (type=STRING)\n\
+          peer name\n\
    [ -d ] [ --directory ] (type=STRING)\n\
           directory containing files\n\
    [ -r ] [ --room ] (type=STRING, default=DefaultRoom#1)\n\

@@ -1,11 +1,13 @@
 #ifndef WEBRTC_HPP
 #define WEBRTC_HPP
 
+#include "Logger.hpp"
 #include "MessagePort.hpp"
 #include "PropertyBag.hpp"
 
 #include <rapidjson/document.h>
 
+#include <vector>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -32,7 +34,19 @@ public:
     void Stop();
     bool IsRunning();
 
-    void MessageRouter(const std::string& jsonStr) {
+
+    /* Return a list of people in the room */
+    bool
+    GetPeers(
+        const std::string& room,
+        std::vector<std::string>& peers
+    );
+
+
+    void
+    MessageRouter(
+        const std::string& jsonStr
+    ) {
         rapidjson::Document doc;
         doc.Parse(jsonStr.data(), jsonStr.size());
 
@@ -60,10 +74,15 @@ public:
             case string_hash("pong"):
                 OnPingPong(doc);
                 break;
+            default:
+                Logger::warn()
+                    << "Unhandled message: "
+                    << jsonStr;
+                break;
         }
     }
 
-    virtual void OnMessageOpen(const std::string& user) = 0;
+    virtual void OnMessageOpen(const std::string& peer) = 0;
     virtual void OnMessageClose(int code, std::string_view message) = 0;
 
 protected:
@@ -76,10 +95,23 @@ protected:
     virtual void OnFileOffer(rapidjson::Document& doc) = 0;
     virtual void OnPingPong(rapidjson::Document& doc) = 0;
 
+    bool
+    Join(
+        const std::string& peer,
+        const std::string& room
+    );
+
+    bool
+    Leave(
+        const std::string& peer,
+        const std::string& room
+    );
+
     bool SendMessage(const std::string& message) { return messagePort_->Send(message); }
     MessagePort::Ws* CurrentWebSocket() const { return currentWebSocket_; }
     const PropertyBag& Properties() const { return properties_; }
 
+    std::map<std::string, std::vector<std::string>> rooms_;
 private:
     PropertyBag properties_;
     std::unique_ptr<MessagePort> messagePort_;

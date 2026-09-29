@@ -1,18 +1,31 @@
 #include "MessagePortClient.hpp"
 #include "Logger.hpp"
 
+/** Registers the callback invoked when a message is received. */
 void MessagePortClient::OnMessage(MessageCallback callback) {
     messageCallback_ = std::move(callback);
 }
 
+/** Registers the callback invoked when the WebSocket connection closes. */
 void MessagePortClient::OnClose(CloseCallback callback) {
     closeCallback_ = std::move(callback);
 }
 
+/** Registers the callback invoked after the WebSocket connection opens. */
 void MessagePortClient::OnOpen(OpenCallback callback) {
     openCallback_ = std::move(callback);
 }
 
+/**
+ * Creates and starts the WebSocket client.
+ *
+ * The client identifies itself with the configured name in the
+ * `x-client-id` request header. WebSocket events are translated into the
+ * registered callbacks, and the socket's event loop runs on a background
+ * thread.
+ *
+ * @return false when the client is already running; true when startup begins.
+ */
 bool MessagePortClient::Start(const std::string& address, int port) {
     std::unique_lock<std::mutex> lock(mtx_);
     if (isRunning_) {
@@ -26,6 +39,7 @@ bool MessagePortClient::Start(const std::string& address, int port) {
     headers["x-client-id"] = name_;
     socket_->setExtraHeaders(headers);
 
+    // Translate WebSocket events into MessagePortClient state and callbacks.
     socket_->setOnMessageCallback([this](const ix::WebSocketMessagePtr& msg) {
         if (!msg) {
             return;
@@ -74,6 +88,7 @@ bool MessagePortClient::Start(const std::string& address, int port) {
     return true;
 }
 
+/** Sends a text message through the active WebSocket connection. */
 bool MessagePortClient::Send(const std::string& message) {
     if (!socket_) {
         return false;
@@ -82,6 +97,7 @@ bool MessagePortClient::Send(const std::string& message) {
     return socket_->send(message).success;
 }
 
+/** Stops the WebSocket and waits for its background thread to finish. */
 void MessagePortClient::Stop() {
     {
         std::lock_guard<std::mutex> lock(mtx_);
@@ -96,6 +112,7 @@ void MessagePortClient::Stop() {
     }
 }
 
+/** Returns whether the client has received an open event and remains active. */
 bool MessagePortClient::IsRunning() {
     std::lock_guard<std::mutex> lock(mtx_);
     return isRunning_;

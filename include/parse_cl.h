@@ -2,7 +2,7 @@
 **
 ** parse_cl.h
 **
-** Sat Sep 26 09:32:06 2026
+** Mon Sep 28 14:18:54 2026
 ** Linux 6.8.0-51-generic (#52-Ubuntu SMP PREEMPT_DYNAMIC Thu Dec  5 13:09:44 UTC 2024) x86_64
 ** jrichard@SpinRun42 (Jason Richards)
 **
@@ -38,6 +38,7 @@ private:
   std::string _stunAddress;
   int _stunPort;
   std::string _name;
+  std::string _peer;
   std::string _directory;
   std::string _room;
   std::string _file;
@@ -50,7 +51,7 @@ private:
 
 public:
   /* constructor and destructor */
-  Cmdline (int, char **) ;
+  Cmdline (int, char **);
   ~Cmdline (){}
 
   /* usage function */
@@ -65,6 +66,7 @@ public:
   std::string stunAddress () const { return _stunAddress; }
   int stunPort () const { return _stunPort; }
   std::string name () const { return _name; }
+  std::string peer () const { return _peer; }
   std::string directory () const { return _directory; }
   std::string room () const { return _room; }
   std::string file () const { return _file; }

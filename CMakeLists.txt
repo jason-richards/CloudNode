@@ -152,6 +152,7 @@ target_link_libraries(CloudNode PRIVATE
     ZLIB::ZLIB 
     OpenSSL::SSL 
     OpenSSL::Crypto
+    magic
 )
 
 if(TARGET ixwebsocket)
@@ -162,6 +163,32 @@ else()
     message(FATAL_ERROR "IXWebSocket target was not created by FetchContent.")
 endif()
 target_include_directories(CloudNode PRIVATE ${B64_INCLUDE_DIR} ${RAPIDJSON_INCLUDE_DIR})
+
+
+# UPDATE Commandline Parser
+add_custom_target(
+    generate_parser
+    # 1. Run the genparse command
+    COMMAND genparse --language=c++ --cppext=cpp --longmembers misc/options.gp
+    
+    # 2. Copy the modified files to their destination folders
+    COMMAND ${CMAKE_COMMAND} -E copy "parse_cl.h" "${CMAKE_CURRENT_SOURCE_DIR}/include/parse_cl.h"
+    COMMAND ${CMAKE_COMMAND} -E copy "parse_cl.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/src/parse_cl.cpp"
+
+    # 3. Directly target and strip out the 'throw' specifier completely
+    # Works regardless of spaces around the parentheses or inside the signature.
+    COMMAND sed -i "s/\\+Cmdline::Cmdline (int argc, char \\*argv\\[\\]) throw (std::string )/Cmdline::Cmdline (int argc, char *argv[])/g" include/parse_cl.h
+    COMMAND sed -i "s/\\+Cmdline::Cmdline (int argc, char \\*argv\\[\\]) throw (std::string )/Cmdline::Cmdline (int argc, char *argv[])/g" src/parse_cl.cpp
+    
+    # 4. Clean up the loose copies left behind in the root folder
+    COMMAND ${CMAKE_COMMAND} -E remove "parse_cl.h" "parse_cl.cpp"
+    
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    COMMENT "Running genparse, fixing exception syntax, and distributing parser files..."
+    VERBATIM
+)
+
+
 
 # Testing setup
 #enable_testing()

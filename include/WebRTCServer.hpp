@@ -5,14 +5,13 @@
 
 #include <map>
 #include <string>
-#include <vector>
 
 class WebRTCServer final : public WebRTC {
 public:
     explicit WebRTCServer(const PropertyBag& properties)
         : WebRTC(MessagePort::Type::Server, properties) {}
 
-    void OnMessageOpen(const std::string& user) override;
+    void OnMessageOpen(const std::string& peer) override;
     void OnMessageClose(int code, std::string_view message) override;
 
 protected:
@@ -30,14 +29,13 @@ private:
         std::string mimeType;
     };
 
-    void SendJoinNotification(const std::string& whoToNotify, const std::string& whoJoined);
-    void SendLeaveNotification(const std::string& whoToNotify, const std::string& whoLeft);
-    void Leave(const std::string& user, const std::string& room);
+    void SendJoinNotification(const std::string& whoToNotify, const std::string& whoJoined, const std::string& room);
+    void SendLeaveNotification(const std::string& whoToNotify, const std::string& whoLeft, const std::string& room);
+    void Leave(const std::string& peer, const std::string& room);
     void HandleFile(rapidjson::Document& doc, FileDetails& file);
 
     std::map<std::string, MessagePort::Ws*> clientDB_;
     std::map<std::string, std::string> pendingOffers_;
-    std::map<std::string, std::vector<std::string>> rooms_;
 };
 
 #endif // WEBRTC_SERVER_HPP

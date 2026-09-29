@@ -181,6 +181,41 @@ LocalDescription::LocalDescription(
     processArrays("candidates",   candidates);
 }
 
+std::string
+LocalDescription::GetDescriptionsJson() const {
+    std::ostringstream oss;
+
+    oss << "\"descriptions\" :[";
+    for (size_t i = 0; i < descriptions.size(); ++i) {
+        if (i > 0) oss << ","; // Add comma between items
+        
+        std::string encoded;
+        if (base64Encode(descriptions[i], encoded)) {
+            oss << "\"" << encoded << "\"";
+        }
+    }
+    oss << "]";
+
+    return oss.str();
+}
+
+std::string
+LocalDescription::GetCandidatesJson() const {
+    std::ostringstream oss;
+
+    oss << "\"candidates\" :[";
+    for (size_t i = 0; i < candidates.size(); ++i) {
+        if (i > 0) oss << ","; // Add comma between items
+        
+        std::string encoded;
+        if (base64Encode(candidates[i], encoded)) {
+            oss << "\"" << encoded << "\"";
+        }
+    }
+    oss << "]";
+
+    return oss.str();
+}
 
 std::string
 LocalDescription::toJson() const {
@@ -209,3 +244,44 @@ LocalDescription::toJson() const {
     return oss.str();
 }
 
+bool
+obtainInitialDescription(
+    std::shared_ptr<rtc::PeerConnection> pc,
+    LocalDescription &desc,
+    int time_out
+) {
+    if (!pc) return false;
+
+    std::mutex mtx;
+    std::condition_variable cv;
+    bool done = false;
+
+    pc->onGatheringStateChange([&](rtc::PeerConnection::GatheringState state) {
+        std::lock_guard<std::mutex> lock(mtx);
+        if (state == rtc::PeerConnection::GatheringState::Complete) {
+            done = true;
+            cv.notify_one();
+        }
+    });
+
+    pc->onLocalDescription([&](rtc::Description description) {
+        desc.descriptions.emplace_back(description);
+    });
+
+    pc->onLocalCandidate([&](rtc::Candidate candidate) {
+        desc.candidates.emplace_back(candidate);
+    });
+
+    if (!pc->createDataChannel(std::string("Initial Description"))) {
+        return false;
+    }
+
+    std::unique_lock<std::mutex> lock(mtx);
+    return cv.wait_for(
+        lock,
+        std::chrono::seconds(time_out),
+        [&done] {
+            return done;
+        }
+    );
+}

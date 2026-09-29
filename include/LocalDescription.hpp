@@ -1,4 +1,5 @@
 #pragma once
+#include "rtc/rtc.hpp"
 
 #include <memory>
 #include <string>
@@ -17,6 +18,12 @@ LocalDescription{
 
     std::string
     toJson() const;
+
+    std::string
+    GetDescriptionsJson() const;
+
+    std::string
+    GetCandidatesJson() const;
 
     friend std::ostream& operator<<(std::ostream& os, const LocalDescription& obj);
 
@@ -88,5 +95,31 @@ bool
 base64Decode(
     const std::string &input,
     std::string& decoded
+);
+
+
+
+/**
+ * @brief Gathers the initial RTCPeerConnection candidates.
+ *
+ * This function attempts to gather the initial ICE (Interactive Connectivity Establishment) candidates from a given
+ * PeerConnection. The purpose is to collect all possible candidate addresses that can be used for establishing a 
+ * connection between peers in a WebRTC session.
+ *
+ * @param pc A shared pointer to an rtc::PeerConnection object, representing the RTCPeerConnection instance.
+ * @param desc A reference to a LocalDescription object, which will hold the gathered description after this
+ * function completes.
+ * @param time_out The maximum number of seconds to wait before timing out the operation. Defaults to 10 seconds if
+ * not specified.
+ *
+ * @return bool True if the candidates were successfully gathered within the given timeout period; otherwise, false.
+ *
+ * @note This function should be called once an RTCPeerConnection has been created and configured appropriately.
+ */
+bool
+obtainInitialDescription(
+    std::shared_ptr<rtc::PeerConnection> pc,
+    LocalDescription &desc,
+    int time_out = 10
 );
 

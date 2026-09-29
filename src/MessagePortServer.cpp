@@ -79,14 +79,14 @@ bool MessagePortServer::Start(const std::string& address, int port) {
                         context);
                 },
                 .open = [this](auto* ws) {
-                    PerSocketData *userData = (PerSocketData *) ws->getUserData();
+                    PerSocketData *peerData = (PerSocketData *) ws->getUserData();
                     // Track the client connection
-                    if (clients.find(userData->x_client_id) == clients.end()) {
-                        clients[userData->x_client_id] = ws;
+                    if (clients.find(peerData->x_client_id) == clients.end()) {
+                        clients[peerData->x_client_id] = ws;
                     }
                     // Execute open callback if set
                     if (openCallback_) {
-                        openCallback_(ws, userData->x_client_id);
+                        openCallback_(ws, peerData->x_client_id);
                     }
                 },
                 .message = [this](auto* ws, std::string_view message, uWS::OpCode opCode) {

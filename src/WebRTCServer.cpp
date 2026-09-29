@@ -23,9 +23,9 @@ WebRTCServer::OnPingPong(
     if (!ws) {
         return;
     }
-    auto user = ws->getUserData()->x_client_id;
-    Logger::info() << "\'" << user << "\' sent \'ping\'; sending \'pong\'.";
-    ws->send("{\"type\" : \"pong\", \"id\" : \"" + user + "\"}");
+    auto peer = ws->getUserData()->x_client_id;
+    Logger::info() << "\'" << peer << "\' sent \'ping\'; sending \'pong\'.";
+    ws->send("{\"type\" : \"pong\", \"id\" : \"" + peer + "\"}");
 }
 
 
@@ -39,7 +39,8 @@ WebRTCServer::OnPingPong(
 void
 WebRTCServer::SendJoinNotification(
     const std::string& whoToNotify,
-    const std::string& whoJoined
+    const std::string& whoJoined,
+    const std::string& room
 ) {
     auto ws = clientDB_.find(whoToNotify);
     if (ws == clientDB_.end()) {
@@ -48,7 +49,7 @@ WebRTCServer::SendJoinNotification(
     }
 
     Logger::info() << "Notifying \'" << whoToNotify << "\' that \'" << whoJoined << "\' joined.";
-    ws->second->send("{\"type\" : \"peer_joined\", \"peerId\" : \"" + whoJoined + "\"}");
+    ws->second->send("{\"type\" : \"peer_joined\", \"peerId\" : \"" + whoJoined + "\", \"room\" : \"" + room + "\" }");
 }
 
 
@@ -66,27 +67,25 @@ WebRTCServer::OnJoin(
     if (!ws) {
         return;
     }
-    auto user = ws->getUserData()->x_client_id;
+
+    auto peer = ws->getUserData()->x_client_id;
     if (!doc.HasMember("room") || !doc["room"].IsString()) {
         Logger::warn() << "Join command with no room specification.";
         return;
     }
 
     std::string room = doc["room"].GetString();
-    Logger::info() << "User \'" << user << "\' requested to join room \'" << room << "\'.";
-    if (rooms_.find(room) == rooms_.end()) {
-        rooms_[room] = std::vector<std::string>();
-    }
-    if (std::find(rooms_[room].begin(), rooms_[room].end(), user) != rooms_[room].end()) {
-        Logger::warn() << user << " already joined " << room << ".";
+
+    Logger::info() << "User \'" << peer << "\' requested to join room \'" << room << "\'.";
+
+    if (!Join(peer, room)) {
         return;
     }
 
-    clientDB_[user] = ws;
+    clientDB_[peer] = ws;
     for (auto u : rooms_[room]) {
-        SendJoinNotification(u, user);
+        SendJoinNotification(u, peer, room);
     }
-    rooms_[room].push_back(user);
 }
 
 
@@ -100,7 +99,8 @@ WebRTCServer::OnJoin(
 void
 WebRTCServer::SendLeaveNotification(
     const std::string& whoToNotify,
-    const std::string& whoLeft
+    const std::string& whoLeft,
+    const std::string& room
 ) {
     auto ws = clientDB_.find(whoToNotify);
     if (ws == clientDB_.end()) {
@@ -109,7 +109,7 @@ WebRTCServer::SendLeaveNotification(
     }
 
     Logger::info() << "Notifying \'" << whoToNotify << "\' that \'" << whoLeft << "\' left.";
-    ws->second->send("{\"type\" : \"peer_left\", \"peerId\" : \"" + whoLeft + "\"}");
+    ws->second->send("{\"type\" : \"peer_left\", \"peerId\" : \"" + whoLeft + "\", \"room\" : \"" + room + "\" }");
 }
 
 
@@ -117,28 +117,17 @@ WebRTCServer::SendLeaveNotification(
 /**
  * @brief Removes a client from a room and notifies the remaining members.
  *
- * @param user Identifier of the departing client.
+ * @param peer Identifier of the departing client.
  * @param room Room from which the client is leaving.
  */
 void
 WebRTCServer::Leave(
-    const std::string& user,
+    const std::string& peer,
     const std::string& room
 ) {
-    if (rooms_.find(room) == rooms_.end()) {
-        Logger::warn() << "Room \'" << room << "\', does not exist.";
-        return;
-    }
-
-    auto it = std::find(rooms_[room].begin(), rooms_[room].end(), user);
-    if (it == rooms_[room].end()) {
-        Logger::warn() << "User \'" << user << "\' sent leave, however not part of room \'" << room << "\'.";
-        return;
-    }
-
-    rooms_[room].erase(it);
+    WebRTC::Leave(peer, room);
     for (auto u : rooms_[room]) {
-        SendLeaveNotification(u, user);
+        SendLeaveNotification(u, peer, room);
     }
 }
 
@@ -157,13 +146,13 @@ WebRTCServer::OnLeave(
     if (!ws) {
         return;
     }
-    auto user = ws->getUserData()->x_client_id;
+    auto peer = ws->getUserData()->x_client_id;
     if (!doc.HasMember("room") || !doc["room"].IsString()) {
         Logger::warn() << "leave command with no room specification.";
         return;
     }
 
-    Leave(user, doc["room"].GetString());
+    Leave(peer, doc["room"].GetString());
 }
 
 
@@ -184,7 +173,7 @@ WebRTCServer::HandleFile(
 ) {
     (void) file;
     if (!doc.HasMember("room") || !doc["room"].IsString() ||
-        !doc.HasMember("to") || !doc["to"].IsString() ||
+        !doc.HasMember("peer") || !doc["peer"].IsString() ||
         !doc.HasMember("file") || !doc["file"].IsObject()) {
         Logger::error() << "Invalid file command format";
         return;
@@ -195,23 +184,23 @@ WebRTCServer::HandleFile(
         return;
     }
     std::string fromId = ws->getUserData()->x_client_id;
-    std::string toId = doc["to"].GetString();
+    std::string peerId = doc["peer"].GetString();
     std::string room = doc["room"].GetString();
     if (std::find(rooms_[room].begin(), rooms_[room].end(), fromId) == rooms_[room].end() ||
-        std::find(rooms_[room].begin(), rooms_[room].end(), toId) == rooms_[room].end()) {
+        std::find(rooms_[room].begin(), rooms_[room].end(), peerId) == rooms_[room].end()) {
         Logger::error() << "File command participants must both be in room \'" << room << "\'.";
         return;
     }
 
-    doc.EraseMember("to");
+    doc.EraseMember("peer");
     doc.AddMember(
         rapidjson::Value("from", doc.GetAllocator()),
         rapidjson::Value(fromId.c_str(), doc.GetAllocator()),
         doc.GetAllocator());
 
-    auto toWs = clientDB_.find(toId);
+    auto toWs = clientDB_.find(peerId);
     if (toWs == clientDB_.end()) {
-        Logger::error() << "Unable to find socket for \'" << toId << "\'.";
+        Logger::error() << "Unable to find socket for \'" << peerId << "\'.";
         return;
     }
 
@@ -219,7 +208,7 @@ WebRTCServer::HandleFile(
     rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
     doc.Accept(writer);
     if (!toWs->second->send(buffer.GetString())) {
-        Logger::error() << "Error encountered making offer to \'" << toId << "\'.";
+        Logger::error() << "Error encountered making offer to \'" << peerId << "\'.";
     }
 }
 
@@ -252,7 +241,7 @@ WebRTCServer::OnFileOffer(
         return;
     }
     Logger::info() << "File offer from \'" << ws->getUserData()->x_client_id
-                   << "\', to \'" << doc["to"].GetString() << "\': " << file.name;
+                   << "\', to \'" << doc["peer"].GetString() << "\': " << file.name;
     HandleFile(doc, file);
 }
 
@@ -288,13 +277,13 @@ WebRTCServer::OnFileAccept(
 /**
  * @brief Handles a newly opened WebSocket connection.
  *
- * @param user Identifier associated with the connection.
+ * @param peer Identifier associated with the connection.
  */
 void
 WebRTCServer::OnMessageOpen(
-    const std::string& user
+    const std::string& peer
 ) {
-    Logger::info() << "\'" << user << "\' connected.";
+    Logger::info() << "\'" << peer << "\' connected.";
 }
 
 
@@ -316,11 +305,11 @@ WebRTCServer::OnMessageClose(
     if (!ws) {
         return;
     }
-    auto user = ws->getUserData()->x_client_id;
-    Logger::info() << "\'" << user << "\' has closed connection.";
+    auto peer = ws->getUserData()->x_client_id;
+    Logger::info() << "\'" << peer << "\' has closed connection.";
     for (const auto& [key, value] : rooms_) {
-        if (std::find(rooms_[key].begin(), rooms_[key].end(), user) != rooms_[key].end()) {
-            Leave(user, key);
+        if (std::find(rooms_[key].begin(), rooms_[key].end(), peer) != rooms_[key].end()) {
+            Leave(peer, key);
         }
     }
 }
