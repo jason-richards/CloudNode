@@ -2,7 +2,7 @@
 **
 ** parse_cl.h
 **
-** Mon Sep 28 14:18:54 2026
+** Wed Sep 30 10:15:46 2026
 ** Linux 6.8.0-51-generic (#52-Ubuntu SMP PREEMPT_DYNAMIC Thu Dec  5 13:09:44 UTC 2024) x86_64
 ** jrichard@SpinRun42 (Jason Richards)
 **
@@ -33,6 +33,7 @@ class Cmdline
 private:
   /* parameters */
   bool _server;
+  int _timeout;
   std::string _messageAddress;
   int _messagePort;
   std::string _stunAddress;
@@ -61,6 +62,7 @@ public:
   int next_param () { return _optind; }
 
   bool server () const { return _server; }
+  int timeout () const { return _timeout; }
   std::string messageAddress () const { return _messageAddress; }
   int messagePort () const { return _messagePort; }
   std::string stunAddress () const { return _stunAddress; }

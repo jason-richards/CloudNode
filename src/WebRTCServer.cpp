@@ -42,8 +42,8 @@ WebRTCServer::SendJoinNotification(
     const std::string& whoJoined,
     const std::string& room
 ) {
-    auto ws = clientDB_.find(whoToNotify);
-    if (ws == clientDB_.end()) {
+        auto ws = m_clientDB.find(whoToNotify);
+        if (ws == m_clientDB.end()) {
         Logger::error() << "User: " + whoToNotify + " not found.";
         return;
     }
@@ -82,8 +82,8 @@ WebRTCServer::OnJoin(
         return;
     }
 
-    clientDB_[peer] = ws;
-    for (auto u : rooms_[room]) {
+        m_clientDB[peer] = ws;
+        for (auto u : m_rooms[room]) {
         SendJoinNotification(u, peer, room);
     }
 }
@@ -102,8 +102,8 @@ WebRTCServer::SendLeaveNotification(
     const std::string& whoLeft,
     const std::string& room
 ) {
-    auto ws = clientDB_.find(whoToNotify);
-    if (ws == clientDB_.end()) {
+        auto ws = m_clientDB.find(whoToNotify);
+        if (ws == m_clientDB.end()) {
         Logger::warn() << "User: " + whoToNotify + " not found.";
         return;
     }
@@ -126,7 +126,7 @@ WebRTCServer::Leave(
     const std::string& room
 ) {
     WebRTC::Leave(peer, room);
-    for (auto u : rooms_[room]) {
+     for (auto u : m_rooms[room]) {
         SendLeaveNotification(u, peer, room);
     }
 }
@@ -186,8 +186,8 @@ WebRTCServer::HandleFile(
     std::string fromId = ws->getUserData()->x_client_id;
     std::string peerId = doc["peer"].GetString();
     std::string room = doc["room"].GetString();
-    if (std::find(rooms_[room].begin(), rooms_[room].end(), fromId) == rooms_[room].end() ||
-        std::find(rooms_[room].begin(), rooms_[room].end(), peerId) == rooms_[room].end()) {
+        if (std::find(m_rooms[room].begin(), m_rooms[room].end(), fromId) == m_rooms[room].end() ||
+            std::find(m_rooms[room].begin(), m_rooms[room].end(), peerId) == m_rooms[room].end()) {
         Logger::error() << "File command participants must both be in room \'" << room << "\'.";
         return;
     }
@@ -198,8 +198,8 @@ WebRTCServer::HandleFile(
         rapidjson::Value(fromId.c_str(), doc.GetAllocator()),
         doc.GetAllocator());
 
-    auto toWs = clientDB_.find(peerId);
-    if (toWs == clientDB_.end()) {
+        auto toWs = m_clientDB.find(peerId);
+        if (toWs == m_clientDB.end()) {
         Logger::error() << "Unable to find socket for \'" << peerId << "\'.";
         return;
     }
@@ -307,8 +307,8 @@ WebRTCServer::OnMessageClose(
     }
     auto peer = ws->getUserData()->x_client_id;
     Logger::info() << "\'" << peer << "\' has closed connection.";
-    for (const auto& [key, value] : rooms_) {
-        if (std::find(rooms_[key].begin(), rooms_[key].end(), peer) != rooms_[key].end()) {
+    for (const auto& [key, value] : m_rooms) {
+            if (std::find(m_rooms[key].begin(), m_rooms[key].end(), peer) != m_rooms[key].end()) {
             Leave(peer, key);
         }
     }

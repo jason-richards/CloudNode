@@ -20,8 +20,8 @@ public:
 
 private:
     std::map<std::string, Ws*> clients;
-    uWS::Loop* loop_{nullptr};
-    us_listen_socket_t* listenSocket_{nullptr};
+    uWS::Loop* m_loop{nullptr};
+    us_listen_socket_t* m_listenSocket{nullptr};
 };
 
 #endif // CONTROL_PORT_SERVER_HPP

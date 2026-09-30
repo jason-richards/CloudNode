@@ -42,14 +42,14 @@ public:
     virtual bool IsRunning() = 0;
 
 protected:
-    MessagePort(const std::string& name) : name_(name) {};
-    MessageCallback messageCallback_;
-    CloseCallback closeCallback_;
-    OpenCallback openCallback_;
-    std::thread serverThread_;
-    std::atomic<bool> isRunning_{false};
-    std::mutex mtx_;
-    std::string name_;
+    MessagePort(const std::string& name) : m_name(name) {};
+    MessageCallback m_messageCallback;
+    CloseCallback m_closeCallback;
+    OpenCallback m_openCallback;
+    std::thread m_serverThread;
+    std::atomic<bool> m_isRunning{false};
+    std::mutex m_mtx;
+    std::string m_name;
 };
 
 #endif // CONTROL_PORT_HPP

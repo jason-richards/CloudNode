@@ -13,35 +13,35 @@ WebRTC::Create(const PropertyBag& properties) {
 }
 
 WebRTC::WebRTC(MessagePort::Type type, const PropertyBag& properties)
-    : properties_(properties),
-      messagePort_(MessagePort::Create(type, properties_.Get<std::string>("name"))) {
-    messagePort_->OnOpen([this](MessagePort::Ws* ws, const std::string& peer) {
-        currentWebSocket_ = ws;
+        : m_properties(properties),
+            m_messagePort(MessagePort::Create(type, m_properties.Get<std::string>("name"))) {
+        m_messagePort->OnOpen([this](MessagePort::Ws* ws, const std::string& peer) {
+                m_currentWebSocket = ws;
         OnMessageOpen(peer);
     });
-    messagePort_->OnClose([this](MessagePort::Ws* ws, int code, std::string_view message) {
-        currentWebSocket_ = ws;
+    m_messagePort->OnClose([this](MessagePort::Ws* ws, int code, std::string_view message) {
+        m_currentWebSocket = ws;
         OnMessageClose(code, message);
     });
-    messagePort_->OnMessage([this](MessagePort::Ws* ws, const std::string& message) {
-        currentWebSocket_ = ws;
+    m_messagePort->OnMessage([this](MessagePort::Ws* ws, const std::string& message) {
+        m_currentWebSocket = ws;
         MessageRouter(message);
     });
 }
 
 bool WebRTC::Start() {
-    return messagePort_->Start(
-        properties_.Get<std::string>("messageAddress"),
-        properties_.Get<int>("messagePort")
+    return m_messagePort->Start(
+        m_properties.Get<std::string>("messageAddress"),
+        m_properties.Get<int>("messagePort")
     );
 }
 
 void WebRTC::Stop() {
-    messagePort_->Stop();
+    m_messagePort->Stop();
 }
 
 bool WebRTC::IsRunning() {
-    return messagePort_->IsRunning();
+    return m_messagePort->IsRunning();
 }
 
 bool
@@ -64,16 +64,16 @@ WebRTC::Join(
     const std::string& peer,
     const std::string& room
 ) {
-    if (rooms_.find(room) == rooms_.end()) {
-        rooms_[room] = std::vector<std::string>();
+    if (m_rooms.find(room) == m_rooms.end()) {
+        m_rooms[room] = std::vector<std::string>();
     }
 
-    if (std::find(rooms_[room].begin(), rooms_[room].end(), peer) != rooms_[room].end()) {
+    if (std::find(m_rooms[room].begin(), m_rooms[room].end(), peer) != m_rooms[room].end()) {
         Logger::warn() << peer << " already joined " << room << ".";
         return false;
     }
 
-    rooms_[room].push_back(peer);
+    m_rooms[room].push_back(peer);
 
     Logger::info()
         << "User \'"
@@ -99,18 +99,18 @@ WebRTC::Leave(
     const std::string& peer,
     const std::string& room
 ) {
-    if (rooms_.find(room) == rooms_.end()) {
+    if (m_rooms.find(room) == m_rooms.end()) {
         Logger::warn() << "Room \'" << room << "\', does not exist.";
         return false;
     }
 
-    auto it = std::find(rooms_[room].begin(), rooms_[room].end(), peer);
-    if (it == rooms_[room].end()) {
+    auto it = std::find(m_rooms[room].begin(), m_rooms[room].end(), peer);
+    if (it == m_rooms[room].end()) {
         Logger::warn() << "User \'" << peer << "\' sent leave, however not part of room \'" << room << "\'.";
         return false;
     }
 
-    rooms_[room].erase(it);
+    m_rooms[room].erase(it);
 
     Logger::info()
         << "User \'"

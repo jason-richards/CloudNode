@@ -3,17 +3,17 @@
 
 /** Registers the callback invoked when a message is received. */
 void MessagePortClient::OnMessage(MessageCallback callback) {
-    messageCallback_ = std::move(callback);
+    m_messageCallback = std::move(callback);
 }
 
 /** Registers the callback invoked when the WebSocket connection closes. */
 void MessagePortClient::OnClose(CloseCallback callback) {
-    closeCallback_ = std::move(callback);
+    m_closeCallback = std::move(callback);
 }
 
 /** Registers the callback invoked after the WebSocket connection opens. */
 void MessagePortClient::OnOpen(OpenCallback callback) {
-    openCallback_ = std::move(callback);
+    m_openCallback = std::move(callback);
 }
 
 /**
@@ -27,20 +27,20 @@ void MessagePortClient::OnOpen(OpenCallback callback) {
  * @return false when the client is already running; true when startup begins.
  */
 bool MessagePortClient::Start(const std::string& address, int port) {
-    std::unique_lock<std::mutex> lock(mtx_);
-    if (isRunning_) {
+    std::unique_lock<std::mutex> lock(m_mtx);
+    if (m_isRunning) {
         return false;
     }
 
-    socket_ = std::make_unique<ix::WebSocket>();
-    socket_->setUrl(address + ":" + std::to_string(port));
+    m_socket = std::make_unique<ix::WebSocket>();
+    m_socket->setUrl(address + ":" + std::to_string(port));
 
     ix::WebSocketHttpHeaders headers;
-    headers["x-client-id"] = name_;
-    socket_->setExtraHeaders(headers);
+    headers["x-client-id"] = m_name;
+    m_socket->setExtraHeaders(headers);
 
     // Translate WebSocket events into MessagePortClient state and callbacks.
-    socket_->setOnMessageCallback([this](const ix::WebSocketMessagePtr& msg) {
+    m_socket->setOnMessageCallback([this](const ix::WebSocketMessagePtr& msg) {
         if (!msg) {
             return;
         }
@@ -49,40 +49,40 @@ bool MessagePortClient::Start(const std::string& address, int port) {
         case ix::WebSocketMessageType::Open:
             Logger::info() << "ix::WebSocketMessageType::Open";
             {
-                std::lock_guard<std::mutex> lock(mtx_);
-                isRunning_ = true;
+                std::lock_guard<std::mutex> lock(m_mtx);
+                m_isRunning = true;
             }
-            if (openCallback_) {
-                openCallback_(nullptr, name_);
+            if (m_openCallback) {
+                m_openCallback(nullptr, m_name);
             }
             break;
         case ix::WebSocketMessageType::Message:
-            if (messageCallback_) {
-                messageCallback_(nullptr, msg->str);
+            if (m_messageCallback) {
+                m_messageCallback(nullptr, msg->str);
             }
             break;
         case ix::WebSocketMessageType::Close:
             Logger::info() << "ix::WebSocketMessageType::Close";
             {
-                std::lock_guard<std::mutex> lock(mtx_);
-                isRunning_ = false;
+                std::lock_guard<std::mutex> lock(m_mtx);
+                m_isRunning = false;
             }
-            if (closeCallback_) {
-                closeCallback_(nullptr, msg->closeInfo.code, msg->closeInfo.reason);
+            if (m_closeCallback) {
+                m_closeCallback(nullptr, msg->closeInfo.code, msg->closeInfo.reason);
             }
             break;
         case ix::WebSocketMessageType::Error:
             Logger::info() << "ix::WebSocketMessageType::Error";
             {
-                std::lock_guard<std::mutex> lock(mtx_);
-                isRunning_ = false;
+                std::lock_guard<std::mutex> lock(m_mtx);
+                m_isRunning = false;
             }
             break;
         };
     });
 
-    serverThread_ = std::thread([this]() {
-        socket_->start();
+    m_serverThread = std::thread([this]() {
+        m_socket->start();
     });
 
     return true;
@@ -90,30 +90,30 @@ bool MessagePortClient::Start(const std::string& address, int port) {
 
 /** Sends a text message through the active WebSocket connection. */
 bool MessagePortClient::Send(const std::string& message) {
-    if (!socket_) {
+    if (!m_socket) {
         return false;
     }
 
-    return socket_->send(message).success;
+    return m_socket->send(message).success;
 }
 
 /** Stops the WebSocket and waits for its background thread to finish. */
 void MessagePortClient::Stop() {
     {
-        std::lock_guard<std::mutex> lock(mtx_);
-        isRunning_ = false;
+        std::lock_guard<std::mutex> lock(m_mtx);
+        m_isRunning = false;
     }
 
-    if (socket_) {
-        socket_->stop();
+    if (m_socket) {
+        m_socket->stop();
     }
-    if (serverThread_.joinable()) {
-        serverThread_.join();
+    if (m_serverThread.joinable()) {
+        m_serverThread.join();
     }
 }
 
 /** Returns whether the client has received an open event and remains active. */
 bool MessagePortClient::IsRunning() {
-    std::lock_guard<std::mutex> lock(mtx_);
-    return isRunning_;
+    std::lock_guard<std::mutex> lock(m_mtx);
+    return m_isRunning;
 }

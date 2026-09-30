@@ -12,43 +12,43 @@ public:
 
     class LogStream {
     public:
-        LogStream(Level level, std::mutex& mtx) : mutex_(mtx) {
+        LogStream(Level level, std::mutex& mtx) : m_mutex(mtx) {
             // 1. Generate and attach the timestamp
-            stream_ << "[" << get_timestamp() << "] ";
+            m_stream << "[" << get_timestamp() << "] ";
 
             // 2. Attach the colored log level prefix
             switch (level) {
                 case Level::Info:
-                    stream_ << "\033[36m[INFO] \033[0m"; // Cyan
+                    m_stream << "\033[36m[INFO] \033[0m"; // Cyan
                     break;
                 case Level::Warning:
-                    stream_ << "\033[33m[WARNING] \033[0m"; // Yellow
+                    m_stream << "\033[33m[WARNING] \033[0m"; // Yellow
                     break;
                 case Level::Error:
-                    stream_ << "\033[31m[ERROR] \033[0m"; // Red
-                    out_target_ = &std::cerr;
+                    m_stream << "\033[31m[ERROR] \033[0m"; // Red
+                    m_out_target = &std::cerr;
                     break;
                 case Level::Success:
-                    stream_ << "\033[32m[SUCCESS] \033[0m"; // Green
+                    m_stream << "\033[32m[SUCCESS] \033[0m"; // Green
                     break;
             }
         }
 
         // Lock the shared mutex during destruction to safely print the full line
         ~LogStream() {
-            stream_ << "\n";
-            std::lock_guard<std::mutex> lock(mutex_);
-            *out_target_ << stream_.str();
+            m_stream << "\n";
+            std::lock_guard<std::mutex> lock(m_mutex);
+            *m_out_target << m_stream.str();
         }
 
         template <typename T>
         LogStream& operator<<(const T& value) {
-            stream_ << value;
+            m_stream << value;
             return *this;
         }
 
         LogStream& operator<<(std::ostream& (*manip)(std::ostream&)) {
-            stream_ << manip;
+            m_stream << manip;
             return *this;
         }
 
@@ -70,9 +70,9 @@ public:
             return time_stream.str();
         }
 
-        std::ostringstream stream_;
-        std::ostream* out_target_ = &std::cout;
-        std::mutex& mutex_;
+        std::ostringstream m_stream;
+        std::ostream* m_out_target = &std::cout;
+        std::mutex& m_mutex;
     };
 
     // Static hooks referencing a shared global mutex

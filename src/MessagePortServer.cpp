@@ -23,7 +23,7 @@ MessagePortServer::~MessagePortServer() {
  *        It receives the WebSocket pointer and the message string.
  */
 void MessagePortServer::OnMessage(MessageCallback callback) {
-    messageCallback_ = std::move(callback);
+    m_messageCallback = std::move(callback);
 }
 
 /**
@@ -33,7 +33,7 @@ void MessagePortServer::OnMessage(MessageCallback callback) {
  *        It receives the WebSocket pointer, the close code, and the message view.
  */
 void MessagePortServer::OnClose(CloseCallback callback) {
-    closeCallback_ = std::move(callback);
+    m_closeCallback = std::move(callback);
 }
 
 /**
@@ -43,7 +43,7 @@ void MessagePortServer::OnClose(CloseCallback callback) {
  *        It receives the WebSocket pointer and the unique client ID associated with the connection.
  */
 void MessagePortServer::OnOpen(OpenCallback callback) {
-    openCallback_ = std::move(callback);
+    m_openCallback = std::move(callback);
 }
 
 /**
@@ -58,13 +58,13 @@ void MessagePortServer::OnOpen(OpenCallback callback) {
  * @return true if the server started successfully and is listening, false otherwise.
  */
 bool MessagePortServer::Start(const std::string& address, int port) {
-    std::unique_lock<std::mutex> lock(mtx_);
-    if (isRunning_) {
+    std::unique_lock<std::mutex> lock(m_mtx);
+    if (m_isRunning) {
         // Server is already running
         return false;
     }
 
-    serverThread_ = std::thread([this, port]() {
+    m_serverThread = std::thread([this, port]() {
         uWS::App()
             .ws<PerSocketData>("/*", {
                 .upgrade = [](auto *res, auto *req, auto *context) {
@@ -85,37 +85,37 @@ bool MessagePortServer::Start(const std::string& address, int port) {
                         clients[peerData->x_client_id] = ws;
                     }
                     // Execute open callback if set
-                    if (openCallback_) {
-                        openCallback_(ws, peerData->x_client_id);
+                    if (m_openCallback) {
+                        m_openCallback(ws, peerData->x_client_id);
                     }
                 },
                 .message = [this](auto* ws, std::string_view message, uWS::OpCode opCode) {
                     // Handle incoming text messages and execute the callback
-                    if (opCode == uWS::OpCode::TEXT && messageCallback_) {
-                        messageCallback_(ws, std::string(message));
+                    if (opCode == uWS::OpCode::TEXT && m_messageCallback) {
+                        m_messageCallback(ws, std::string(message));
                     }
                 },
                 .close = [this](auto* ws, int code, std::string_view message) {
                     // Execute close callback if set
-                    if (closeCallback_) {
-                        closeCallback_(ws, code, message);
+                    if (m_closeCallback) {
+                        m_closeCallback(ws, code, message);
                     }
                 }
             })
             .listen(port, [this, port](auto* listenSocket) {
                 if (listenSocket) {
-                    listenSocket_ = listenSocket;
-                    loop_ = uWS::Loop::get();
+                    m_listenSocket = listenSocket;
+                    m_loop = uWS::Loop::get();
                     {
-                        std::lock_guard<std::mutex> lock(mtx_);
-                        isRunning_ = true;
+                        std::lock_guard<std::mutex> lock(m_mtx);
+                        m_isRunning = true;
                     }
                 } else {
                     // Error handling if listening fails
                     std::cerr << "MessagePort failed to listen on port " << port << std::endl;
                     {
-                        std::lock_guard<std::mutex> lock(mtx_);
-                        isRunning_ = false;
+                        std::lock_guard<std::mutex> lock(m_mtx);
+                        m_isRunning = false;
                     }
                 }
             })
@@ -150,14 +150,14 @@ void MessagePortServer::Stop() {
     uWS::Loop* loop = nullptr;
     us_listen_socket_t* listenSocket = nullptr;
     {
-        std::lock_guard<std::mutex> lock(mtx_);
-        if (!isRunning_ && !serverThread_.joinable()) {
+        std::lock_guard<std::mutex> lock(m_mtx);
+        if (!m_isRunning && !m_serverThread.joinable()) {
             return; // Already stopped or never started
         }
 
-        isRunning_ = false;
-        loop = loop_;
-        listenSocket = listenSocket_;
+        m_isRunning = false;
+        loop = m_loop;
+        listenSocket = m_listenSocket;
     }
 
     // Defer the socket closing operation to the uWS loop thread
@@ -165,18 +165,18 @@ void MessagePortServer::Stop() {
         loop->defer([this, listenSocket]() {
             us_listen_socket_close(0, listenSocket);
             {
-                std::lock_guard<std::mutex> lock(mtx_);
+                std::lock_guard<std::mutex> lock(m_mtx);
                 // Only clear the socket if it was the one we were tracking
-                if (listenSocket_ == listenSocket) {
-                    listenSocket_ = nullptr;
+                if (m_listenSocket == listenSocket) {
+                    m_listenSocket = nullptr;
                 }
             }
         });
     }
 
     // Wait for the server thread to finish its execution loop
-    if (serverThread_.joinable()) {
-        serverThread_.join();
+    if (m_serverThread.joinable()) {
+        m_serverThread.join();
     }
 }
 
@@ -186,6 +186,6 @@ void MessagePortServer::Stop() {
  * @return true if the internal state indicates the server is active, false otherwise.
  */
 bool MessagePortServer::IsRunning() {
-    std::lock_guard<std::mutex> lock(mtx_);
-    return isRunning_;
+    std::lock_guard<std::mutex> lock(m_mtx);
+    return m_isRunning;
 }

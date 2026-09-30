@@ -10,15 +10,19 @@ public:
 
     template <typename T>
     void Set(const std::string& key, T value) {
-        values_[key] = std::move(value);
+        m_values[key] = std::move(value);
     }
 
     template <typename T>
     const T& Get(const std::string& key) const {
-        return std::get<T>(values_.at(key));
+        return std::get<T>(m_values.at(key));
+    }
+
+    bool Contains(const std::string& key) const {
+        return m_values.contains(key);
     }
 
 private:
-    std::unordered_map<std::string, Value> values_;
+    std::unordered_map<std::string, Value> m_values;
 };
 

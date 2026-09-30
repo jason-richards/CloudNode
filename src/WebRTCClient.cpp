@@ -8,6 +8,7 @@
 #include "rapidjson/writer.h"
 #include "rtc/rtc.hpp"
 
+#include <chrono>
 
 /**
  * @file WebRTCClient.cpp
@@ -29,7 +30,7 @@
  *
  * @param room Identifier of the room to join.
  */
-void
+bool
 WebRTCClient::JoinRoom(
     const std::string& room
 ) {
@@ -45,13 +46,14 @@ WebRTCClient::JoinRoom(
 
     if (!SendMessage(buffer.GetString())) {
         Logger::error() << "Unable to send join request for room '" << room << "'.";
-        return;
+        return false;
     }
 
     Logger::info()
         << "Requested to join room \'"
         << room
         << "\'.";
+    return true;
 }
 
 
@@ -137,11 +139,13 @@ WebRTCClient::SendFileOffer(
  * The ping payload is intentionally minimal and is used to verify that the
  * connection remains alive.
  */
-void
+bool
 WebRTCClient::SendPing() {
     if (!SendMessage("{ \"type\" : \"ping\" }")) {
         Logger::error() << "Unable to send ping.";
+        return false;
     }
+    return true;
 }
 
 
@@ -166,8 +170,22 @@ WebRTCClient::OnJoin(
 
     std::string room = doc["room"].GetString();
     std::string peer = doc["peerId"].GetString();
+    const std::string clientName = Properties().Get<std::string>("name");
 
     Join(peer, room);
+
+    bool joined = false;
+    {
+        std::lock_guard<std::mutex> lock(m_clientStateMutex);
+        if (m_clientState == ClientState::CLIENT_WAITING_FOR_JOIN &&
+            room == m_room && peer == clientName) {
+            m_clientState = ClientState::CLIENT_JOINED;
+            joined = true;
+        }
+    }
+    if (joined) {
+        m_clientStateChanged.notify_all();
+    }
 }
 
 /**
@@ -267,8 +285,29 @@ void
 WebRTCClient::OnPingPong(
     rapidjson::Document& doc
 ) {
-    (void) doc;
-    Logger::info() << "PingPong";
+    if (!doc.HasMember("type") || !doc["type"].IsString() ||
+        std::string(doc["type"].GetString()) != "pong" ||
+        !doc.HasMember("id") || !doc["id"].IsString()) {
+        return;
+    }
+
+    const std::string clientName = Properties().Get<std::string>("name");
+    if (doc["id"].GetString() != clientName) {
+        return;
+    }
+
+    bool receivedPong = false;
+    {
+        std::lock_guard<std::mutex> lock(m_clientStateMutex);
+        if (m_clientState == ClientState::CLIENT_WAIT_FOR_PONG) {
+            m_clientState = ClientState::CLIENT_RUN;
+            receivedPong = true;
+        }
+    }
+    if (receivedPong) {
+        Logger::info() << "Pong received.";
+        m_clientStateChanged.notify_all();
+    }
 }
 
 
@@ -286,22 +325,11 @@ WebRTCClient::OnMessageOpen(
 ) {
     (void) peer;
     Logger::info() << "MessagePort Opened.";
-    try {
-        auto room = Properties().Get<std::string>("room");
-        auto peer = Properties().Get<std::string>("peer");
-        auto file = Properties().Get<std::string>("file");
-        if (room.length()) {
-            JoinRoom(room);
-
-            if (file.length() && peer.length()) {
-                sleep(5);
-                SendFileOffer(room, peer, file);
-                return;
-            }
-        }
-    } catch (const std::exception& e) {}
-
-    Logger::warn() << "No \'room\' to join specified.";
+    {
+        std::lock_guard<std::mutex> lock(m_clientStateMutex);
+        m_transportOpen = true;
+    }
+    m_clientStateChanged.notify_all();
 }
 
 /**
@@ -321,4 +349,172 @@ WebRTCClient::OnMessageClose(
     (void) code;
     (void) message;
     Logger::info() << "MessagePort Closed.";
+    {
+        std::lock_guard<std::mutex> lock(m_clientStateMutex);
+        m_clientState = ClientState::CLIENT_EXIT;
+    }
+    m_clientStateChanged.notify_all();
+}
+
+WebRTCClient::~WebRTCClient() {
+    Stop();
+}
+
+bool
+WebRTCClient::Start() {
+    {
+        std::lock_guard<std::mutex> lock(m_clientStateMutex);
+        m_clientState = ClientState::CLIENT_INIT;
+        m_transportOpen = false;
+    }
+
+    if (!WebRTC::Start()) {
+        return false;
+    }
+
+    m_clientThread = std::thread(&WebRTCClient::StartClient, this);
+    return true;
+}
+
+void
+WebRTCClient::Stop() {
+    {
+        std::lock_guard<std::mutex> lock(m_clientStateMutex);
+        m_clientState = ClientState::CLIENT_EXIT;
+    }
+    m_clientStateChanged.notify_all();
+
+    WebRTC::Stop();
+    if (m_clientThread.joinable()) {
+        m_clientThread.join();
+    }
+}
+
+bool
+WebRTCClient::IsRunning() {
+    std::lock_guard<std::mutex> lock(m_clientStateMutex);
+    return m_clientState != ClientState::CLIENT_EXIT;
+}
+
+void
+WebRTCClient::StartClient() {
+    std::chrono::seconds timeout{5};
+    std::unique_lock<std::mutex> lock(m_clientStateMutex);
+    while (m_clientState != ClientState::CLIENT_EXIT) {
+        if (m_clientState == ClientState::CLIENT_INIT) {
+            lock.unlock();
+            std::string room;
+            std::string peer;
+            std::string file;
+            int timeoutSeconds;
+            try {
+                room = Properties().Get<std::string>("room");
+                timeoutSeconds = Properties().Get<int>("timeout");
+                if (Properties().Contains("peer")) {
+                    peer = Properties().Get<std::string>("peer");
+                }
+                if (Properties().Contains("file")) {
+                    file = Properties().Get<std::string>("file");
+                }
+            } catch (const std::exception& error) {
+                Logger::error() << "Unable to read client properties: " << error.what();
+                lock.lock();
+                m_clientState = ClientState::CLIENT_EXIT;
+                continue;
+            }
+            if (timeoutSeconds <= 0) {
+                Logger::error() << "Client timeout must be greater than zero seconds.";
+                lock.lock();
+                m_clientState = ClientState::CLIENT_EXIT;
+                continue;
+            }
+            timeout = std::chrono::seconds(timeoutSeconds);
+            lock.lock();
+
+            m_room = std::move(room);
+            m_peer = std::move(peer);
+            m_file = std::move(file);
+            m_clientStateChanged.wait(lock, [this]() {
+                return m_transportOpen || m_clientState == ClientState::CLIENT_EXIT;
+            });
+            if (m_clientState == ClientState::CLIENT_EXIT) {
+                break;
+            }
+
+            if (m_room.empty()) {
+                Logger::warn() << "No 'room' to join specified.";
+                m_clientState = ClientState::CLIENT_RUN;
+                continue;
+            }
+
+            m_clientState = ClientState::CLIENT_WAITING_FOR_JOIN;
+            lock.unlock();
+            const bool sent = JoinRoom(m_room);
+            lock.lock();
+            if (!sent && m_clientState != ClientState::CLIENT_EXIT) {
+                m_clientState = ClientState::CLIENT_EXIT;
+            }
+            continue;
+        }
+
+        if (m_clientState == ClientState::CLIENT_JOINED) {
+            const auto room = m_room;
+            const auto peer = m_peer;
+            const auto file = m_file;
+            lock.unlock();
+            if (!peer.empty() && !file.empty()) {
+                SendFileOffer(room, peer, file);
+            }
+            lock.lock();
+            if (m_clientState == ClientState::CLIENT_JOINED) {
+                m_clientState = ClientState::CLIENT_RUN;
+            }
+            continue;
+        }
+
+        if (m_clientState == ClientState::CLIENT_RUN) {
+            const bool interrupted = m_clientStateChanged.wait_for(
+                lock,
+                timeout,
+                [this]() { return m_clientState != ClientState::CLIENT_RUN; }
+            );
+            if (!interrupted && m_clientState == ClientState::CLIENT_RUN) {
+                m_clientState = ClientState::CLIENT_PING;
+            }
+            continue;
+        }
+
+        if (m_clientState == ClientState::CLIENT_PING) {
+            m_clientState = ClientState::CLIENT_WAIT_FOR_PONG;
+            lock.unlock();
+            const bool sent = SendPing();
+            lock.lock();
+            if (!sent && m_clientState == ClientState::CLIENT_WAIT_FOR_PONG) {
+                m_clientState = ClientState::CLIENT_EXIT;
+            }
+            continue;
+        }
+
+        if (m_clientState == ClientState::CLIENT_WAIT_FOR_PONG) {
+            const bool interrupted = m_clientStateChanged.wait_for(
+                lock,
+                timeout,
+                [this]() { return m_clientState != ClientState::CLIENT_WAIT_FOR_PONG; }
+            );
+            if (!interrupted && m_clientState == ClientState::CLIENT_WAIT_FOR_PONG) {
+                Logger::warn() << "Timed out waiting for pong.";
+                m_clientState = ClientState::CLIENT_EXIT;
+            }
+            continue;
+        }
+
+        m_clientStateChanged.wait(lock, [this]() {
+            return m_clientState == ClientState::CLIENT_INIT ||
+                   m_clientState == ClientState::CLIENT_JOINED ||
+                   m_clientState == ClientState::CLIENT_RUN ||
+                   m_clientState == ClientState::CLIENT_PING ||
+                   m_clientState == ClientState::CLIENT_WAIT_FOR_PONG ||
+                   m_clientState == ClientState::CLIENT_EXIT;
+        });
+    }
 }

@@ -30,9 +30,9 @@ public:
 
     static std::unique_ptr<WebRTC> Create(const PropertyBag& properties);
 
-    bool Start();
-    void Stop();
-    bool IsRunning();
+    virtual bool Start();
+    virtual void Stop();
+    virtual bool IsRunning();
 
 
     /* Return a list of people in the room */
@@ -107,15 +107,15 @@ protected:
         const std::string& room
     );
 
-    bool SendMessage(const std::string& message) { return messagePort_->Send(message); }
-    MessagePort::Ws* CurrentWebSocket() const { return currentWebSocket_; }
-    const PropertyBag& Properties() const { return properties_; }
+    bool SendMessage(const std::string& message) { return m_messagePort->Send(message); }
+    MessagePort::Ws* CurrentWebSocket() const { return m_currentWebSocket; }
+    const PropertyBag& Properties() const { return m_properties; }
 
-    std::map<std::string, std::vector<std::string>> rooms_;
+    std::map<std::string, std::vector<std::string>> m_rooms;
 private:
-    PropertyBag properties_;
-    std::unique_ptr<MessagePort> messagePort_;
-    MessagePort::Ws* currentWebSocket_{nullptr};
+    PropertyBag m_properties;
+    std::unique_ptr<MessagePort> m_messagePort;
+    MessagePort::Ws* m_currentWebSocket{nullptr};
 };
 
 #endif // WEBRTC_HPP

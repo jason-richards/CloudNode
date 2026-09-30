@@ -82,6 +82,7 @@ main(
     properties.Set("help", params.help());
     properties.Set("version", params.version());
     properties.Set("name", name);
+    properties.Set("timeout", params.timeout());
 
     Logger::info() << "'" << name << "' is coming online.";
 
@@ -95,8 +96,8 @@ main(
         << "mode.";
 
     if (webRTC->Start()) {
-        while (!StopRequested(g_stopToken)) {
-            std::this_thread::sleep_for(std::chrono::seconds(5));
+        while (!StopRequested(g_stopToken) && (isServer || webRTC->IsRunning())) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
         webRTC->Stop();
     }

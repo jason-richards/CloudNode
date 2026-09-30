@@ -1,4 +1,5 @@
 s    / server               flag    "start in server mode"
+t    / timeout              int     10    "ping/pong timeout interval."
 NONE / messageAddress       string  {"ws://localhost"}  "message server hostname or IP address"
 NONE / messagePort          int     8080  "message server port"
 NONE / stunAddress          string  {"stun.l.google.com"}  "STUN server hostname or IP address"

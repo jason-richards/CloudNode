@@ -34,8 +34,8 @@ private:
     void Leave(const std::string& peer, const std::string& room);
     void HandleFile(rapidjson::Document& doc, FileDetails& file);
 
-    std::map<std::string, MessagePort::Ws*> clientDB_;
-    std::map<std::string, std::string> pendingOffers_;
+    std::map<std::string, MessagePort::Ws*> m_clientDB;
+    std::map<std::string, std::string> m_pendingOffers;
 };
 
 #endif // WEBRTC_SERVER_HPP

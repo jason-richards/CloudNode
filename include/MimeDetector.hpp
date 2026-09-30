@@ -12,15 +12,15 @@ namespace fs = std::filesystem;
 
 class MimeDetector {
 public:
-    MimeDetector() : cookie_(magic_open(MAGIC_MIME_TYPE)) {
-        if (cookie_) {
-            magic_load(cookie_, NULL);
+    MimeDetector() : m_cookie(magic_open(MAGIC_MIME_TYPE)) {
+        if (m_cookie) {
+            magic_load(m_cookie, NULL);
         }
     }
 
     ~MimeDetector() {
-        if (cookie_) {
-            magic_close(cookie_);
+        if (m_cookie) {
+            magic_close(m_cookie);
         }
     }
 
@@ -76,7 +76,7 @@ public:
     }
 
 private:
-    magic_t cookie_;
+    magic_t m_cookie;
 };
 
 

@@ -175,10 +175,8 @@ add_custom_target(
     COMMAND ${CMAKE_COMMAND} -E copy "parse_cl.h" "${CMAKE_CURRENT_SOURCE_DIR}/include/parse_cl.h"
     COMMAND ${CMAKE_COMMAND} -E copy "parse_cl.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/src/parse_cl.cpp"
 
-    # 3. Directly target and strip out the 'throw' specifier completely
-    # Works regardless of spaces around the parentheses or inside the signature.
-    COMMAND sed -i "s/\\+Cmdline::Cmdline (int argc, char \\*argv\\[\\]) throw (std::string )/Cmdline::Cmdline (int argc, char *argv[])/g" include/parse_cl.h
-    COMMAND sed -i "s/\\+Cmdline::Cmdline (int argc, char \\*argv\\[\\]) throw (std::string )/Cmdline::Cmdline (int argc, char *argv[])/g" src/parse_cl.cpp
+    # 3. Remove the unsupported dynamic exception specification from generated C++.
+    COMMAND sed -i "s/ throw (std::string *)//g" include/parse_cl.h src/parse_cl.cpp
     
     # 4. Clean up the loose copies left behind in the root folder
     COMMAND ${CMAKE_COMMAND} -E remove "parse_cl.h" "parse_cl.cpp"

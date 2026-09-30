@@ -18,7 +18,7 @@ public:
     bool IsRunning() override;
 
 private:
-    std::unique_ptr<ix::WebSocket> socket_;
+    std::unique_ptr<ix::WebSocket> m_socket;
 };
 
 #endif // CONTROL_PORT_CLIENT_HPP

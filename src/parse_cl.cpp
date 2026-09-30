@@ -2,7 +2,7 @@
 **
 ** parse_cl.cpp
 **
-** Mon Sep 28 14:18:54 2026
+** Wed Sep 30 10:15:46 2026
 ** Linux 6.8.0-51-generic (#52-Ubuntu SMP PREEMPT_DYNAMIC Thu Dec  5 13:09:44 UTC 2024) x86_64
 ** jrichard@SpinRun42 (Jason Richards)
 **
@@ -35,6 +35,7 @@ Cmdline::Cmdline (int argc, char *argv[])
   static struct option long_options[] =
   {
     {"server", no_argument, NULL, 's'},
+    {"timeout", required_argument, NULL, 't'},
     {"messageAddress", required_argument, NULL, 256},
     {"messagePort", required_argument, NULL, 257},
     {"stunAddress", required_argument, NULL, 258},
@@ -53,6 +54,7 @@ Cmdline::Cmdline (int argc, char *argv[])
 
   /* default values */
   _server = false;
+  _timeout = 10;
   _messageAddress = "ws://localhost";
   _messagePort = 8080;
   _stunAddress = "stun.l.google.com";
@@ -62,12 +64,16 @@ Cmdline::Cmdline (int argc, char *argv[])
   _version = false;
 
   optind = 0;
-  while ((c = getopt_long (argc, argv, "sn:p:d:r:f:hv", long_options, &optind)) != - 1)
+  while ((c = getopt_long (argc, argv, "st:n:p:d:r:f:hv", long_options, &optind)) != - 1)
     {
       switch (c)
         {
         case 's': 
           _server = true;
+          break;
+
+        case 't': 
+          _timeout = atoi (optarg);
           break;
 
         case 256: 
@@ -143,6 +149,8 @@ usage: " << _program_name << " [options]\n\
 WebRTC file transfer client/server.\n\
    [ -s ] [ --server ] (type=FLAG)\n\
           start in server mode\n\
+   [ -t ] [ --timeout ] (type=INTEGER, default=10)\n\
+          ping/pong timeout interval.\n\
    [ --messageAddress ] (type=STRING, default=ws://localhost)\n\
           message server hostname or IP address\n\
    [ --messagePort ] (type=INTEGER, default=8080)\n\
