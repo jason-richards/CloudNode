@@ -175,8 +175,8 @@ add_custom_target(
     COMMAND ${CMAKE_COMMAND} -E copy "parse_cl.h" "${CMAKE_CURRENT_SOURCE_DIR}/include/parse_cl.h"
     COMMAND ${CMAKE_COMMAND} -E copy "parse_cl.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/src/parse_cl.cpp"
 
-    # 3. Remove the unsupported dynamic exception specification from generated C++.
-    COMMAND sed -i "s/ throw (std::string *)//g" include/parse_cl.h src/parse_cl.cpp
+    # 3. Remove generated dynamic exception specifications regardless of whitespace.
+    COMMAND sed -i "s/[[:space:]]*throw[[:space:]]*([^)]*)//g" include/parse_cl.h src/parse_cl.cpp
     
     # 4. Clean up the loose copies left behind in the root folder
     COMMAND ${CMAKE_COMMAND} -E remove "parse_cl.h" "parse_cl.cpp"
