@@ -17,6 +17,11 @@
  * This file contains the logic used by a WebRTC client to connect to a message
  * relay, join a room, send keepalive pings, and handle server-side protocol
  * notifications such as join, leave, file-transfer events, and ping responses.
+ *
+ * The client has a background worker that coordinates connection readiness,
+ * room joining, an optional initial file offer, and periodic ping/pong checks.
+ * The worker's state and configuration are protected by the client-state mutex;
+ * transport callbacks wake it through the associated condition variable.
  */
 
 
@@ -29,6 +34,7 @@
  * @endcode
  *
  * @param room Identifier of the room to join.
+ * @return true if the serialized join request was sent successfully.
  */
 bool
 WebRTCClient::JoinRoom(
@@ -57,6 +63,19 @@ WebRTCClient::JoinRoom(
 }
 
 
+/**
+ * @brief Creates and sends the client's initial file offer.
+ *
+ * Builds a peer connection using the configured STUN server, gathers an
+ * initial local description, obtains file metadata, and sends a JSON
+ * `file_offer` message containing the room, recipient, metadata, description,
+ * and ICE candidates. The recipient identifier must match the name with which
+ * that peer connected to the message server.
+ *
+ * @param room Room containing the sender and recipient.
+ * @param peer Identifier of the intended recipient.
+ * @param fileDetails Path or file specification passed to MimeDetector.
+ */
 void
 WebRTCClient::SendFileOffer(
     const std::string&  room,
@@ -137,7 +156,11 @@ WebRTCClient::SendFileOffer(
  * @brief Sends a lightweight keepalive ping to the message server.
  *
  * The ping payload is intentionally minimal and is used to verify that the
- * connection remains alive.
+ * connection remains alive. A successful send only confirms that the local
+ * transport accepted the message; the worker waits separately for a matching
+ * pong response.
+ *
+ * @return true if the ping was sent successfully.
  */
 bool
 WebRTCClient::SendPing() {
@@ -152,7 +175,11 @@ WebRTCClient::SendPing() {
 /**
  * @brief Handles a server join event.
  *
- * @param doc JSON payload received for the join event.
+ * Adds the announced peer to this client's local room membership. When the
+ * event confirms this client has joined its configured room, changes the
+ * worker state to `CLIENT_JOINED` and wakes the worker.
+ *
+ * @param doc JSON payload containing the room and peerId fields.
  */
 void
 WebRTCClient::OnJoin(
@@ -191,7 +218,11 @@ WebRTCClient::OnJoin(
 /**
  * @brief Handles a server leave event.
  *
- * @param doc JSON payload received for the leave event.
+ * Removes the announced peer from this client's local room membership. The
+ * event is ignored if either the room or peerId field is missing or has the
+ * wrong JSON type.
+ *
+ * @param doc JSON payload containing the room and peerId fields.
  */
 void
 WebRTCClient::OnLeave(
@@ -215,6 +246,9 @@ WebRTCClient::OnLeave(
 
 /**
  * @brief Handles a file-accept notification.
+ *
+ * This handler currently logs the notification only; the document is not yet
+ * used to update a peer connection or continue a file transfer.
  *
  * @param doc JSON payload describing the accepted file transfer.
  */
@@ -245,7 +279,12 @@ WebRTCClient::OnFileAccept(
 /**
  * @brief Handles a file-offer event.
  *
- * @param doc JSON payload containing the offered file metadata.
+ * The current implementation initializes a peer connection with the
+ * configured STUN server and gathers an initial local description. It does
+ * not yet read the offer document or apply remote descriptions/candidates.
+ *
+ * @param doc JSON payload containing the offered file metadata and signaling
+ *            data; currently unused by this implementation.
  */
 void
 WebRTCClient::OnFileOffer(
@@ -279,7 +318,11 @@ WebRTCClient::OnFileOffer(
 /**
  * @brief Handles a ping/pong response from the message server.
  *
- * @param doc JSON payload returned by the remote peer or relay.
+ * Ignores malformed messages, non-pong messages, and pongs addressed to a
+ * different client. A matching pong received while waiting transitions the
+ * worker back to `CLIENT_RUN` and wakes it.
+ *
+ * @param doc JSON payload returned by the message server.
  */
 void
 WebRTCClient::OnPingPong(
@@ -312,12 +355,12 @@ WebRTCClient::OnPingPong(
 
 
 /**
- * @brief Called when the underlying message transport has opened.
+ * @brief Handles the message transport's open callback.
  *
- * On connection establishment, the client immediately joins the configured room
- * defined in the property bag using the "r" entry.
+ * Marks the transport ready and wakes the worker. The worker, rather than this
+ * callback, sends the configured room-join request.
  *
- * @param peer Identifier or metadata supplied by the transport.
+ * @param peer Identifier supplied by the transport; unused by this client.
  */
 void
 WebRTCClient::OnMessageOpen(
@@ -335,8 +378,9 @@ WebRTCClient::OnMessageOpen(
 /**
  * @brief Handles closure of the underlying message transport.
  *
- * This callback logs the disconnect event and preserves the client lifecycle
- * semantics for the WebRTC message channel.
+ * Marks the worker as exiting and wakes it so any condition-variable wait can
+ * finish. The close code and reason are currently logged only indirectly and
+ * are not otherwise used.
  *
  * @param code WebSocket close code.
  * @param message WebSocket close message.
@@ -356,10 +400,25 @@ WebRTCClient::OnMessageClose(
     m_clientStateChanged.notify_all();
 }
 
+/**
+ * @brief Stops the client when it is destroyed.
+ *
+ * Delegates to Stop so the transport and background worker are shut down
+ * before the object is released.
+ */
 WebRTCClient::~WebRTCClient() {
     Stop();
 }
 
+/**
+ * @brief Starts the message transport and the client worker thread.
+ *
+ * Resets the worker state, starts the base WebRTC transport, and launches
+ * StartClient to perform the room-join and keepalive workflow. If the base
+ * transport cannot start, no worker thread is launched.
+ *
+ * @return The result of starting the base WebRTC transport.
+ */
 bool
 WebRTCClient::Start() {
     {
@@ -376,6 +435,12 @@ WebRTCClient::Start() {
     return true;
 }
 
+/**
+ * @brief Requests client shutdown and joins its worker thread.
+ *
+ * Sets the exit state under the state mutex, wakes any worker wait, stops the
+ * base transport, and joins the worker if it was started.
+ */
 void
 WebRTCClient::Stop() {
     {
@@ -390,12 +455,42 @@ WebRTCClient::Stop() {
     }
 }
 
+/**
+ * @brief Reports whether the client worker has not entered its exit state.
+ *
+ * This reports the client lifecycle state, not the underlying transport's
+ * independent running flag.
+ *
+ * @return true unless the worker state is `CLIENT_EXIT`.
+ */
 bool
 WebRTCClient::IsRunning() {
     std::lock_guard<std::mutex> lock(m_clientStateMutex);
     return m_clientState != ClientState::CLIENT_EXIT;
 }
 
+/**
+ * @brief Runs the client lifecycle and keepalive state machine.
+ *
+ * Reads configuration from the property bag, waits for the transport-open
+ * callback, requests room membership, optionally sends the configured initial
+ * file offer, then alternates between an idle interval and ping/pong checks.
+ * The state mutex protects state and configuration shared with callbacks; it
+ * is released around transport and file-offer operations to avoid holding it
+ * during external work.
+ *
+ * State flow:
+ * - `CLIENT_INIT` loads configuration and waits for the transport.
+ * - `CLIENT_WAITING_FOR_JOIN` waits for this client's join notification.
+ * - `CLIENT_JOINED` sends an initial offer when both peer and file are set.
+ * - `CLIENT_RUN` waits for the timeout interval before requesting a ping.
+ * - `CLIENT_PING` sends a ping and enters `CLIENT_WAIT_FOR_PONG`.
+ * - `CLIENT_WAIT_FOR_PONG` returns to `CLIENT_RUN` on a matching pong, or
+ *   enters `CLIENT_EXIT` on send failure or timeout.
+ *
+ * Invalid configuration, a failed join send, a transport close, or an
+ * explicit Stop request also leads to `CLIENT_EXIT`.
+ */
 void
 WebRTCClient::StartClient() {
     std::chrono::seconds timeout{5};

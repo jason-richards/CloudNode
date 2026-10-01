@@ -64,16 +64,11 @@ WebRTC::Join(
     const std::string& peer,
     const std::string& room
 ) {
-    if (m_rooms.find(room) == m_rooms.end()) {
-        m_rooms[room] = std::vector<std::string>();
-    }
-
-    if (std::find(m_rooms[room].begin(), m_rooms[room].end(), peer) != m_rooms[room].end()) {
+    auto& peers = m_rooms[room];
+    if (!peers.insert(peer).second) {
         Logger::warn() << peer << " already joined " << room << ".";
         return false;
     }
-
-    m_rooms[room].push_back(peer);
 
     Logger::info()
         << "User \'"
@@ -104,13 +99,14 @@ WebRTC::Leave(
         return false;
     }
 
-    auto it = std::find(m_rooms[room].begin(), m_rooms[room].end(), peer);
-    if (it == m_rooms[room].end()) {
+    auto& peers = m_rooms[room];
+    auto it = peers.find(peer);
+    if (it == peers.end()) {
         Logger::warn() << "User \'" << peer << "\' sent leave, however not part of room \'" << room << "\'.";
         return false;
     }
 
-    m_rooms[room].erase(it);
+    peers.erase(it);
 
     Logger::info()
         << "User \'"

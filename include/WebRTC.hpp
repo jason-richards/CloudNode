@@ -7,10 +7,12 @@
 
 #include <rapidjson/document.h>
 
-#include <vector>
+#include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <string_view>
+#include <vector>
 
 
 class WebRTC {
@@ -111,7 +113,7 @@ protected:
     MessagePort::Ws* CurrentWebSocket() const { return m_currentWebSocket; }
     const PropertyBag& Properties() const { return m_properties; }
 
-    std::map<std::string, std::vector<std::string>> m_rooms;
+    std::map<std::string, std::set<std::string>> m_rooms;
 private:
     PropertyBag m_properties;
     std::unique_ptr<MessagePort> m_messagePort;

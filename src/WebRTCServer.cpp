@@ -186,8 +186,9 @@ WebRTCServer::HandleFile(
     std::string fromId = ws->getUserData()->x_client_id;
     std::string peerId = doc["peer"].GetString();
     std::string room = doc["room"].GetString();
-        if (std::find(m_rooms[room].begin(), m_rooms[room].end(), fromId) == m_rooms[room].end() ||
-            std::find(m_rooms[room].begin(), m_rooms[room].end(), peerId) == m_rooms[room].end()) {
+    if (m_rooms[room].find(fromId) == m_rooms[room].end() ||
+        m_rooms[room].find(peerId) == m_rooms[room].end()
+    ) {
         Logger::error() << "File command participants must both be in room \'" << room << "\'.";
         return;
     }
@@ -307,9 +308,9 @@ WebRTCServer::OnMessageClose(
     }
     auto peer = ws->getUserData()->x_client_id;
     Logger::info() << "\'" << peer << "\' has closed connection.";
-    for (const auto& [key, value] : m_rooms) {
-            if (std::find(m_rooms[key].begin(), m_rooms[key].end(), peer) != m_rooms[key].end()) {
-            Leave(peer, key);
+    for (const auto& [room, peers] : m_rooms) {
+        if (peers.find(peer) != peers.end()) {
+            Leave(peer, room);
         }
     }
 }
