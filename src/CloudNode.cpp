@@ -51,16 +51,7 @@ main(
 
     sigaction(SIGINT, &newHandler, &oldHandler);
 
-    //rtc::Configuration config;
     Cmdline params(argc, argv);
-
-    //std::string stunServer;
-    //if (params.stunAddress().substr(0, 5).compare("stun:") != 0) {
-    //    stunServer = "stun:";
-    //}
-
-    //stunServer += params.stunAddress() + ":" + std::to_string(params.stunPort());
-    //config.iceServers.emplace_back(stunServer);
 
     std::string name;
     if (params.name().length()) {

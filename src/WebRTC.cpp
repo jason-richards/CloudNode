@@ -3,6 +3,25 @@
 #include "WebRTCClient.hpp"
 #include "WebRTCServer.hpp"
 
+/**
+ * @file WebRTC.cpp
+ * @brief Implements shared WebRTC transport setup and room membership.
+ *
+ * This file selects the client or server implementation from the property
+ * bag, connects MessagePort events to the virtual WebRTC callbacks, and keeps
+ * the local room-to-peer membership table used by both roles.
+ */
+
+/**
+ * @brief Creates the configured WebRTC role.
+ *
+ * The `server` property selects WebRTCServer when true; otherwise a
+ * WebRTCClient is created. The concrete object is returned through the shared
+ * WebRTC interface.
+ *
+ * @param properties Configuration values used by the selected implementation.
+ * @return A newly created server or client instance.
+ */
 std::unique_ptr<WebRTC>
 WebRTC::Create(const PropertyBag& properties) {
     if (properties.Get<bool>("server")) {
@@ -12,6 +31,17 @@ WebRTC::Create(const PropertyBag& properties) {
     return std::make_unique<WebRTCClient>(properties);
 }
 
+/**
+ * @brief Initializes the message transport and binds its event callbacks.
+ *
+ * Creates a MessagePort for the requested role using the configured local
+ * name. On each transport event, the socket is recorded as the current socket
+ * before the corresponding virtual callback is invoked. Incoming messages
+ * are passed to MessageRouter for parsing and command dispatch.
+ *
+ * @param type Whether the transport operates in server or client mode.
+ * @param properties Configuration values retained by this WebRTC instance.
+ */
 WebRTC::WebRTC(MessagePort::Type type, const PropertyBag& properties)
         : m_properties(properties),
             m_messagePort(MessagePort::Create(type, m_properties.Get<std::string>("name"))) {
@@ -29,6 +59,15 @@ WebRTC::WebRTC(MessagePort::Type type, const PropertyBag& properties)
     });
 }
 
+/**
+ * @brief Starts the message transport.
+ *
+ * Reads the configured message address and port and delegates startup to the
+ * MessagePort implementation.
+ *
+ * @return true if the MessagePort reports that startup was initiated
+ *         successfully; otherwise false.
+ */
 bool WebRTC::Start() {
     return m_messagePort->Start(
         m_properties.Get<std::string>("messageAddress"),
@@ -36,14 +75,35 @@ bool WebRTC::Start() {
     );
 }
 
+/**
+ * @brief Stops the message transport.
+ *
+ * Delegates shutdown to MessagePort. Role-specific workers, when present, are
+ * managed by the derived class.
+ */
 void WebRTC::Stop() {
     m_messagePort->Stop();
 }
 
+/**
+ * @brief Reports whether the message transport is running.
+ *
+ * @return The running status reported by MessagePort.
+ */
 bool WebRTC::IsRunning() {
     return m_messagePort->IsRunning();
 }
 
+/**
+ * @brief Placeholder for retrieving the peers in a room.
+ *
+ * This free-function stub is not connected to a WebRTC instance and currently
+ * neither reads room membership nor modifies the output vector.
+ *
+ * @param room Room whose peers would be retrieved.
+ * @param peers Output vector intended to receive peer identifiers.
+ * @return false; peer retrieval is not implemented here.
+ */
 bool
 GetPeers(
     const std::string& room,
@@ -53,11 +113,14 @@ GetPeers(
 }
 
 /**
- * @brief Handles a join command and adds the client to the requested room.
+ * @brief Adds a peer to a room's local membership set.
  *
- * @param peer User that wants to join room
- * @param room Room the peer wants to join
- * @result true if successfully joined room.
+ * Indexing the room map creates an empty membership set for a room that does
+ * not yet exist. Set insertion rejects duplicate peer identifiers.
+ *
+ * @param peer Identifier of the peer joining.
+ * @param room Identifier of the room to join.
+ * @return true if the peer was newly added; false if already a member.
  */
 bool
 WebRTC::Join(
@@ -83,11 +146,14 @@ WebRTC::Join(
 
 
 /**
- * @brief Handles a leave command and removes the client to the requested room.
+ * @brief Removes a peer from a room's local membership set.
  *
- * @param peer User that wants to leave room
- * @param room Room the peer wants to leave
- * @result true if successfully left room.
+ * The room must already exist and contain the peer. The room entry is retained
+ * if its membership set becomes empty.
+ *
+ * @param peer Identifier of the peer leaving.
+ * @param room Identifier of the room to leave.
+ * @return true if the peer was removed; false if the room or peer was absent.
  */
 bool
 WebRTC::Leave(
