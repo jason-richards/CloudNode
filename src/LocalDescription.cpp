@@ -13,6 +13,16 @@
 #include "LocalDescription.hpp"
 
 /**
+ * @file LocalDescription.cpp
+ * @brief Implements the WebRTC SDP/candidate representation used by CloudNode.
+ *
+ * This file centralizes creation and serialization of local peer descriptions,
+ * including generation of a unique identifier, Base64 encoding for JSON-safe
+ * transport, and the helper that gathers initial ICE candidates from a
+ * `rtc::PeerConnection`.
+ */
+
+/**
  * @brief Generates a random Universally Unique Identifier (UUID) Version 4.
  *
  * This function creates a random 128-bit number compliant with RFC 4122, Version 4.
@@ -138,9 +148,20 @@ base64Decode(
 }
 
 
+/**
+ * @brief Constructs a new LocalDescription with a generated UUID.
+ *
+ * The default constructor assigns a fresh RFC 4122 UUID v4 and leaves the
+ * serialized description and candidate collections empty.
+ */
 LocalDescription::LocalDescription() : UUID(generateUUID()) {};
 
-
+/**
+ * @brief Copies the contents of another LocalDescription.
+ *
+ * @param other The source instance whose UUID, description list, and candidate list
+ *              should be duplicated.
+ */
 LocalDescription::LocalDescription(
     const LocalDescription& other
 ) {
@@ -149,7 +170,16 @@ LocalDescription::LocalDescription(
     this->candidates = other.candidates;
 }
 
-
+/**
+ * @brief Rebuilds a LocalDescription from a JSON payload.
+ *
+ * The input document is expected to contain a UUID string and optional
+ * `descriptions` and `candidates` arrays, where each item is Base64-encoded.
+ * When parsing succeeds, the arrays are decoded back to their original string
+ * values and appended to the destination vectors.
+ *
+ * @param jsonStr JSON text produced by `toJson()` or a compatible structure.
+ */
 LocalDescription::LocalDescription(
     const std::string& jsonStr
 ) {
@@ -181,6 +211,14 @@ LocalDescription::LocalDescription(
     processArrays("candidates",   candidates);
 }
 
+/**
+ * @brief Produces a JSON fragment for the `descriptions` array.
+ *
+ * Each stored description is Base64-encoded so it can be safely embedded in a
+ * JSON string without invalid characters or binary content.
+ *
+ * @return std::string A JSON array fragment beginning with `"descriptions"`.
+ */
 std::string
 LocalDescription::GetDescriptionsJson() const {
     std::ostringstream oss;
@@ -199,6 +237,14 @@ LocalDescription::GetDescriptionsJson() const {
     return oss.str();
 }
 
+/**
+ * @brief Produces a JSON fragment for the `candidates` array.
+ *
+ * Similar to descriptions, ICE candidates are stored as base64 values so that
+ * their textual representation remains valid JSON and can be round-tripped.
+ *
+ * @return std::string A JSON array fragment beginning with `"candidates"`.
+ */
 std::string
 LocalDescription::GetCandidatesJson() const {
     std::ostringstream oss;
@@ -217,6 +263,15 @@ LocalDescription::GetCandidatesJson() const {
     return oss.str();
 }
 
+/**
+ * @brief Serializes the LocalDescription object to a JSON document.
+ *
+ * The output is a compact object containing the UUID and both arrays of
+ * encoded values. This format is used to transfer a local peer description over
+ * text-based channels without exposing raw binary or otherwise unsafe content.
+ *
+ * @return std::string A JSON representation of the instance.
+ */
 std::string
 LocalDescription::toJson() const {
     std::ostringstream oss;
@@ -244,6 +299,24 @@ LocalDescription::toJson() const {
     return oss.str();
 }
 
+/**
+ * @brief Gathers the initial local SDP and ICE candidates for a peer connection.
+ *
+ * This helper installs callbacks on the provided WebRTC peer connection so it can
+ * collect the generated description and any ICE candidates until gathering is
+ * complete or the timeout expires. The `LocalDescription` instance is populated
+ * in-place with both the SDP descriptions and candidate strings.
+ *
+ * @param pc Shared pointer to the peer connection whose local data should be
+ *           observed.
+ * @param desc Destination object that receives the gathered descriptions and
+ *             candidates.
+ * @param time_out Maximum number of seconds to wait for gathering to complete.
+ *
+ * @return true if gathering completed before the timeout, false if the peer
+ *         connection was null, the data channel could not be created, or the wait
+ *         timed out.
+ */
 bool
 obtainInitialDescription(
     std::shared_ptr<rtc::PeerConnection> pc,
