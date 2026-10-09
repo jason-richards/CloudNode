@@ -107,6 +107,7 @@ base64Decode(
  * connection between peers in a WebRTC session.
  *
  * @param pc A shared pointer to an rtc::PeerConnection object, representing the RTCPeerConnection instance.
+ * @param channel Output handle for the data channel created to trigger the initial offer.
  * @param desc A reference to a LocalDescription object, which will hold the gathered description after this
  * function completes.
  * @param time_out The maximum number of seconds to wait before timing out the operation. Defaults to 10 seconds if
@@ -119,6 +120,7 @@ base64Decode(
 bool
 obtainInitialDescription(
     std::shared_ptr<rtc::PeerConnection> pc,
+    std::shared_ptr<rtc::DataChannel>& channel,
     LocalDescription &desc,
     int time_out = 10
 );

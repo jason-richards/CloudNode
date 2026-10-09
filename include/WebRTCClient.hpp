@@ -98,6 +98,13 @@ public:
         const std::string&  fileDetails
     );
 
+    void
+    SendFileAccept(
+        const std::string&  room,
+        const std::string&  peer,
+        const std::string&  fileDetails
+    );
+
 protected:
 
     /**
@@ -117,6 +124,8 @@ protected:
      * @param doc JSON payload returned by the remote side accepting a transfer.
      */
     void OnFileAccept(rapidjson::Document& doc) override;
+    void OnAnswer(rapidjson::Document& doc) override;
+    void OnCandidate(rapidjson::Document& doc) override;
 
     /**
      * @brief Handles a remote file offer received by the client.
@@ -141,6 +150,7 @@ private:
         CLIENT_RUN,
         CLIENT_PING,
         CLIENT_WAIT_FOR_PONG,
+        CLIENT_WAIT_FOR_ACCEPT,
         CLIENT_EXIT
     };
 
@@ -188,6 +198,9 @@ private:
      * @brief Current file target associated with the client workflow.
      */
     std::string m_file;
+
+    std::shared_ptr<rtc::DataChannel> m_dc;
+    std::shared_ptr<rtc::PeerConnection> m_pc;
 };
 
 #endif // WEBRTC_CLIENT_HPP

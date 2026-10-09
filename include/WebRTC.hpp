@@ -6,6 +6,7 @@
 #include "PropertyBag.hpp"
 
 #include <rapidjson/document.h>
+#include "rtc/rtc.hpp"
 
 #include <map>
 #include <memory>
@@ -131,6 +132,12 @@ public:
             case string_hash("file_accept"):
                 OnFileAccept(doc);
                 break;
+            case string_hash("answer"):
+                OnAnswer(doc);
+                break;
+            case string_hash("candidate"):
+                OnCandidate(doc);
+                break;
             case string_hash("file_offer"):
                 OnFileOffer(doc);
                 break;
@@ -194,6 +201,8 @@ protected:
      * @param doc Parsed JSON file-offer payload.
      */
     virtual void OnFileOffer(rapidjson::Document& doc) = 0;
+    virtual void OnAnswer(rapidjson::Document& doc) = 0;
+    virtual void OnCandidate(rapidjson::Document& doc) = 0;
 
     /**
      * @brief Handles ping and pong control traffic.

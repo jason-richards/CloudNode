@@ -8,7 +8,10 @@
 #include "rapidjson/writer.h"
 #include "rtc/rtc.hpp"
 
+#include <array>
 #include <chrono>
+#include <cstring>
+#include <fstream>
 
 /**
  * @file WebRTCClient.cpp
@@ -104,31 +107,107 @@ WebRTCClient::SendFileOffer(
     config.iceServers.emplace_back(stunServer);
 
     Logger::info() << stunServer;
-	auto pc = std::make_shared<rtc::PeerConnection>(config);
+    m_pc = std::make_shared<rtc::PeerConnection>(config);
     LocalDescription desc;
 
-    if (obtainInitialDescription(pc, desc)) {
-        Logger::info() << desc;
-    } else {
+    if (!obtainInitialDescription(m_pc, m_dc, desc)) {
         Logger::warn() << "Failed to get initial description.";
+        return;
     }
 
-/*
-    payload = {                                                                                                         
-        "type"      : "file_offer",                                                                                     
-        "room"      : room,                                                                                             
-        "to"        : who,                                                                                              
-        "file"      : {                                                                                                 
-            "name"      : filename,                                                                                     
-            "size"      : sz,                                                                                           
-            "mimeType"  : mimetypes.types_map[ext]                                                                      
-        }                                                                                                               
-    }                                                                                                                   
-*/
+    m_dc->onOpen([fileDetails, weakChannel = rtc::weak_ptr(m_dc)]() {
+        Logger::info() << "Offering DataChannel open!";
+        auto channel = weakChannel.lock();
+        if (!channel) {
+            Logger::error() << "File data channel is no longer available.";
+            return;
+        }
+
+        struct TransferState {
+            std::mutex mutex;
+            std::condition_variable changed;
+            bool closed{false};
+        };
+        auto transfer = std::make_shared<TransferState>();
+        constexpr size_t bufferedLimit = 16 * 1024;
+        channel->setBufferedAmountLowThreshold(bufferedLimit / 2);
+        channel->onBufferedAmountLow([transfer]() {
+            transfer->changed.notify_one();
+        });
+        channel->onClosed([transfer]() {
+            {
+                std::lock_guard<std::mutex> lock(transfer->mutex);
+                transfer->closed = true;
+            }
+            transfer->changed.notify_one();
+        });
+
+        std::thread([fileDetails, channel, transfer]() {
+            std::ifstream file(fileDetails, std::ios::binary);
+            if (!file) {
+                Logger::error() << "Unable to open file for transfer: " << fileDetails;
+                return;
+            }
+
+            auto waitForCapacity = [&]() {
+                std::unique_lock<std::mutex> lock(transfer->mutex);
+                transfer->changed.wait(lock, [&]() {
+                    return transfer->closed || !channel->isOpen() ||
+                           channel->bufferedAmount() <= 16 * 1024;
+                });
+                return !transfer->closed && channel->isOpen();
+            };
+
+            std::array<char, 16 * 1024> buffer{};
+            std::uint64_t sentBytes = 0;
+            while (true) {
+                file.clear();
+                file.seekg(static_cast<std::streamoff>(sentBytes));
+                if (!file) {
+                    Logger::error() << "Unable to seek file during transfer: " << fileDetails;
+                    return;
+                }
+
+                file.read(buffer.data(), buffer.size());
+                const auto bytesRead = file.gcount();
+                if (bytesRead <= 0) {
+                    break;
+                }
+
+                rtc::binary chunk(static_cast<size_t>(bytesRead));
+                std::memcpy(chunk.data(), buffer.data(), static_cast<size_t>(bytesRead));
+                bool chunkAccepted = false;
+                while (!chunkAccepted) {
+                    if (channel->bufferedAmount() <= bufferedLimit) {
+                        chunkAccepted = channel->send(chunk);
+                    }
+                    if (chunkAccepted) {
+                        sentBytes += static_cast<std::uint64_t>(bytesRead);
+                        break;
+                    }
+                    if (!waitForCapacity()) {
+                        Logger::warn() << "Data channel closed before file transfer completed.";
+                        return;
+                    }
+                }
+            }
+
+            if (file.bad()) {
+                Logger::error() << "Error reading file during transfer: " << fileDetails;
+                return;
+            }
+            Logger::info() << "File data sent: " << fileDetails;
+        }).detach();
+    });
+
+    m_dc->onMessage([](std::variant<rtc::binary, std::string> message) {
+        if (std::holds_alternative<std::string>(message)) {
+            Logger::info() << "Received: " << std::get<std::string>(message);
+        }
+    });
 
     MimeDetector md;
     auto fdsc = md.get_file_info(fileDetails);
-
 
     std::string payload = "";
     payload += "{\"type\" : \"file_offer\", ";
@@ -141,14 +220,13 @@ WebRTCClient::SendFileOffer(
     payload += desc.GetCandidatesJson();
     payload += "}";
 
-
     Logger::info() << payload;
 
-
     if (!SendMessage(payload)) {
-        Logger::error() << "Unable to send join request for room '" << room << "'.";
+        Logger::error() << "Unable to send file_offer command for room '" << room << "'.";
         return;
     }
+
 }
 
 
@@ -259,21 +337,57 @@ WebRTCClient::OnFileAccept(
     (void) doc;
     Logger::info() << "FileAccept";
 
-	//pc->onStateChange(
-	//    [](rtc::PeerConnection::State state) { std::cout << "State: " << state << std::endl; });
+}
 
-	//pc->onGatheringStateChange([](rtc::PeerConnection::GatheringState state) {
-	//	std::cout << "Gathering State: " << state << std::endl;
-	//});
 
-	//pc->onLocalDescription([wws, id](rtc::Description description) {
-	//	json message = {{"id", id},
-	//	                {"type", description.typeString()},
-	//	                {"description", std::string(description)}};
+void
+WebRTCClient::OnAnswer(
+    rapidjson::Document& doc
+) {
+    Logger::info() << "OnAnswer.";
 
-	//	if (auto ws = wws.lock())
-	//		ws->send(message.dump());
-	//});
+    // TODO: Statemachine logic
+
+    if (!m_dc) {
+        Logger::error() << "Received datachannel answer command with no active datachannel.";
+        return;
+    }
+
+    if (!doc.HasMember("sdp") || !doc["sdp"].IsString()) {
+        Logger::error() << "Invalid answer command format";
+        return;
+    }
+
+    std::string sdp = doc["sdp"].GetString();
+    std::string description;
+    if (!base64Decode(sdp, description)) {
+        Logger::error() << "Error decoding SDP.";
+    }
+
+    m_pc->setRemoteDescription(rtc::Description(description, "answer"));
+
+    Logger::info() << "Successfully set SDP.";
+}
+
+
+void
+WebRTCClient::OnCandidate(
+    rapidjson::Document& doc
+) {
+    Logger::info() << "OnCandidate.";
+
+    if (!doc.HasMember("candidate") || !doc["candidate"].IsString()) {
+        Logger::error() << "Invalid candidate command format";
+        return;
+    }
+
+    std::string candidate = doc["candidate"].GetString();
+    //auto mid = message["mid"].get<std::string>();
+
+
+    Logger::info() << "Adding Remote Candidate: " << candidate;
+
+    m_pc->addRemoteCandidate(rtc::Candidate(candidate, "1"));
 }
 
 /**
@@ -291,7 +405,8 @@ WebRTCClient::OnFileOffer(
     rapidjson::Document& doc
 ) {
     (void) doc;
-    Logger::info() << "FileOffer";
+    Logger::info() << "OnFileOffer";
+
     rtc::Configuration config;
     std::string stunServer;
 
@@ -305,15 +420,148 @@ WebRTCClient::OnFileOffer(
     config.iceServers.emplace_back(stunServer);
 
     Logger::info() << stunServer;
-	auto pc = std::make_shared<rtc::PeerConnection>(config);
-    LocalDescription desc;
 
-    if (obtainInitialDescription(pc, desc)) {
-        Logger::info() << desc;
-    } else {
-        Logger::warn() << "Failed to get initial description.";
+    m_pc = std::make_shared<rtc::PeerConnection>(config);
+
+    std::mutex mtx;
+    std::condition_variable cv;
+    bool done = false;
+
+    if (!doc.HasMember("from") || !doc["from"].IsString()) {
+        Logger::warn() << "FileOffer with no from field.";
+        return;
     }
+
+    std::string from = doc["from"].GetString();
+    m_pc->onDataChannel([this, from](std::shared_ptr<rtc::DataChannel> dc) {
+        {
+            std::lock_guard<std::mutex> lock(m_clientStateMutex);
+            m_dc = dc;
+        }
+
+        dc->onOpen([weakPeerConnection = rtc::weak_ptr(m_pc)]() {
+            Logger::info() << "Incoming file data channel opened.";
+            rtc::Candidate local;
+            rtc::Candidate remote;
+            auto pc = weakPeerConnection.lock();
+            if (pc && pc->getSelectedCandidatePair(&local, &remote)) {
+                std::cout << "LOCAL:\n"
+                          << "  address:   " << local.address().value_or("unknown") << '\n'
+                          << "  port:      " << local.port().value_or(0) << '\n'
+                          << "  type:      " << local.type() << '\n'
+                          << "  transport: " << local.transportType() << '\n';
+
+                std::cout << "REMOTE:\n"
+                          << "  address:   " << remote.address().value_or("unknown") << '\n'
+                          << "  port:      " << remote.port().value_or(0) << '\n'
+                          << "  type:      " << remote.type() << '\n'
+                          << "  transport: " << remote.transportType() << '\n';
+            }
+
+        });
+
+        dc->onClosed([from]() { std::cout << "DataChannel from " << from << " closed" << std::endl; });
+
+        dc->onMessage([from](auto data) {
+            // data holds either std::string or rtc::binary
+            if (std::holds_alternative<std::string>(data))
+                std::cout << "Message from " << from << " received: " << std::get<std::string>(data)
+                          << std::endl;
+            else
+                std::cout << "Binary message from " << from
+                          << " received, size=" << std::get<rtc::binary>(data).size() << std::endl;
+        });
+    });
+
+    m_pc->onGatheringStateChange([&](rtc::PeerConnection::GatheringState state) {
+        std::lock_guard<std::mutex> lock(mtx);
+        if (state == rtc::PeerConnection::GatheringState::Complete) {
+            //done = true;
+            //cv.notify_one();
+        }
+    });
+
+
+    // 2. Set up local candidate callback (trickle ICE)
+    m_pc->onLocalCandidate([this, from](rtc::Candidate candidate) {
+        std::ostringstream payload;
+        payload << "{ \"type\" : \"candidate\", "
+                << "\"peer\" : \""
+                << from
+                << "\", \"candidate\" : \""
+                << candidate.candidate()
+                << "\", \"mid\" : \""
+                << candidate.mid()
+                << "\"}";
+
+        if (!SendMessage(payload.str())) {
+            Logger::error() << "Problem sending candidate to server";
+        }
+    });
+
+    // 3. Set up local description callback (sends the generated offer)
+    m_pc->onLocalDescription([this, from](rtc::Description description) {
+        std::string b64desc;
+        if (!base64Encode(std::string(description), b64desc)) {
+            Logger::error() << "Encountered error base64 encoding description payload.";
+            return;
+        }
+
+        std::ostringstream payload;
+
+        payload << "{ \"type\" : \""
+                << std::string(description.typeString())
+                << "\", \"peer\" : \""
+                << from
+                << "\", \"sdp\" : \""
+                << b64desc
+                << "\"}";
+
+        Logger::info() << payload.str();
+        if (!SendMessage(payload.str())) {
+            Logger::error() << "Problem sending description to server";
+        }
+    });
+
+    if (!doc.HasMember("descriptions") || !doc["descriptions"].IsArray()) {
+        Logger::error() << "No remote description found.";
+    } else {
+        std::string sdp;
+        if (base64Decode(doc["descriptions"][0].GetString(), sdp)) {
+            Logger::info() << "Adding Remote Description: " << sdp;
+            m_pc->setRemoteDescription(rtc::Description(sdp, "offer"));
+        } else {
+            Logger::error() << "Invalid SDP.";
+        }
+    }
+
+    if (!doc.HasMember("candidates") || !doc["candidates"].IsArray()) {
+        Logger::error() << "No remote candidates found.";
+    } else {
+        std::string candidate;
+        for (rapidjson::SizeType i = 0; i < doc["candidates"].Size(); i++) {
+            if (base64Decode(doc["candidates"][i].GetString(), candidate)) {
+                Logger::info() << "Adding Remote Candidate: " << candidate;
+                m_pc->addRemoteCandidate(rtc::Candidate(candidate, "0"));
+            } else {
+                Logger::error() << "Invalid Candidate.";
+            }
+        }
+    }
+
+    int timeoutSeconds = Properties().Get<int>("timeout");
+    std::unique_lock<std::mutex> lock(mtx);
+    cv.wait_for(
+        lock,
+        std::chrono::seconds(timeoutSeconds),
+        [&done] {
+            return done;
+        }
+    );
+
+    return;
 }
+
 
 /**
  * @brief Handles a ping/pong response from the message server.

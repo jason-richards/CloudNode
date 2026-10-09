@@ -64,6 +64,9 @@ protected:
      */
     void OnFileAccept(rapidjson::Document& doc) override;
 
+    void OnAnswer(rapidjson::Document& doc) override;
+    void OnCandidate(rapidjson::Document& doc) override;
+
     /**
      * @brief Handles an incoming file-offer message and begins transfer coordination.
      * @param doc JSON payload containing file metadata and negotiation details.
@@ -77,6 +80,12 @@ protected:
     void OnPingPong(rapidjson::Document& doc) override;
 
 private:
+    enum class ClientState {
+        CLIENT_INIT,
+        CLIENT_FILE_SEND,
+        CLIENT_WAIT_FOR_FILE,
+        CLIENT_EXIT
+    };
     /**
      * @brief Metadata associated with a file transfer request.
      */
@@ -117,13 +126,16 @@ private:
      *
      * @param doc JSON payload that contains file information.
      * @param file Output structure receiving file details.
+     * @result bool True if operation was successful.
      */
-    void HandleFile(rapidjson::Document& doc, FileDetails& file);
+    bool HandleFile(rapidjson::Document& doc, FileDetails& file);
 
     /**
      * @brief Maps a client identity to its corresponding websocket reference.
      */
     std::map<std::string, MessagePort::Ws*> m_clientDB;
+    std::map<std::string, ClientState> m_clientStateDB;
+
 };
 
 #endif // WEBRTC_SERVER_HPP

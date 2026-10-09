@@ -320,41 +320,53 @@ LocalDescription::toJson() const {
 bool
 obtainInitialDescription(
     std::shared_ptr<rtc::PeerConnection> pc,
+    std::shared_ptr<rtc::DataChannel>& channel,
     LocalDescription &desc,
     int time_out
 ) {
     if (!pc) return false;
 
-    std::mutex mtx;
-    std::condition_variable cv;
-    bool done = false;
+    struct GatheredDescription {
+        std::mutex mutex;
+        std::condition_variable changed;
+        bool complete{false};
+        LocalDescription description;
+    };
+    auto gathered = std::make_shared<GatheredDescription>();
 
-    pc->onGatheringStateChange([&](rtc::PeerConnection::GatheringState state) {
-        std::lock_guard<std::mutex> lock(mtx);
+    pc->onGatheringStateChange([gathered](rtc::PeerConnection::GatheringState state) {
         if (state == rtc::PeerConnection::GatheringState::Complete) {
-            done = true;
-            cv.notify_one();
+            {
+                std::lock_guard<std::mutex> lock(gathered->mutex);
+                gathered->complete = true;
+            }
+            gathered->changed.notify_one();
         }
     });
 
-    pc->onLocalDescription([&](rtc::Description description) {
-        desc.descriptions.emplace_back(description);
+    pc->onLocalDescription([gathered](rtc::Description description) {
+        std::lock_guard<std::mutex> lock(gathered->mutex);
+        gathered->description.descriptions.emplace_back(std::string(description));
     });
 
-    pc->onLocalCandidate([&](rtc::Candidate candidate) {
-        desc.candidates.emplace_back(candidate);
+    pc->onLocalCandidate([gathered](rtc::Candidate candidate) {
+        std::lock_guard<std::mutex> lock(gathered->mutex);
+        gathered->description.candidates.emplace_back(std::string(candidate));
     });
 
-    if (!pc->createDataChannel(std::string("Initial Description"))) {
+    channel = pc->createDataChannel("File Transfer");
+    if (!channel) {
         return false;
     }
 
-    std::unique_lock<std::mutex> lock(mtx);
-    return cv.wait_for(
+    std::unique_lock<std::mutex> lock(gathered->mutex);
+    if (!gathered->changed.wait_for(
         lock,
         std::chrono::seconds(time_out),
-        [&done] {
-            return done;
-        }
-    );
+        [&gathered] { return gathered->complete; })) {
+        return false;
+    }
+
+    desc = gathered->description;
+    return !desc.descriptions.empty();
 }

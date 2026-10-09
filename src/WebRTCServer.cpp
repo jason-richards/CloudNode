@@ -42,8 +42,8 @@ WebRTCServer::SendJoinNotification(
     const std::string& whoJoined,
     const std::string& room
 ) {
-        auto ws = m_clientDB.find(whoToNotify);
-        if (ws == m_clientDB.end()) {
+    auto ws = m_clientDB.find(whoToNotify);
+    if (ws == m_clientDB.end()) {
         Logger::error() << "User: " + whoToNotify + " not found.";
         return;
     }
@@ -82,10 +82,12 @@ WebRTCServer::OnJoin(
         return;
     }
 
-        m_clientDB[peer] = ws;
-        for (auto u : m_rooms[room]) {
+    m_clientDB[peer] = ws;
+    for (auto u : m_rooms[room]) {
         SendJoinNotification(u, peer, room);
     }
+
+    m_clientStateDB[peer] = ClientState::CLIENT_INIT;
 }
 
 
@@ -165,8 +167,9 @@ WebRTCServer::OnLeave(
  *
  * @param doc Parsed file command document.
  * @param file File metadata extracted from the command.
+ * @result bool True if operation was successful
  */
-void
+bool
 WebRTCServer::HandleFile(
     rapidjson::Document& doc,
     FileDetails& file
@@ -176,12 +179,13 @@ WebRTCServer::HandleFile(
         !doc.HasMember("peer") || !doc["peer"].IsString() ||
         !doc.HasMember("file") || !doc["file"].IsObject()) {
         Logger::error() << "Invalid file command format";
-        return;
+        return false;
     }
 
     auto ws = CurrentWebSocket();
     if (!ws) {
-        return;
+        Logger::error() << "Invalid websocket!";
+        return false;
     }
     std::string fromId = ws->getUserData()->x_client_id;
     std::string peerId = doc["peer"].GetString();
@@ -190,19 +194,20 @@ WebRTCServer::HandleFile(
         m_rooms[room].find(peerId) == m_rooms[room].end()
     ) {
         Logger::error() << "File command participants must both be in room \'" << room << "\'.";
-        return;
+        return false;
     }
 
     doc.EraseMember("peer");
     doc.AddMember(
         rapidjson::Value("from", doc.GetAllocator()),
         rapidjson::Value(fromId.c_str(), doc.GetAllocator()),
-        doc.GetAllocator());
+        doc.GetAllocator()
+    );
 
-        auto toWs = m_clientDB.find(peerId);
-        if (toWs == m_clientDB.end()) {
+    auto toWs = m_clientDB.find(peerId);
+    if (toWs == m_clientDB.end()) {
         Logger::error() << "Unable to find socket for \'" << peerId << "\'.";
-        return;
+        return false;
     }
 
     rapidjson::StringBuffer buffer;
@@ -210,7 +215,10 @@ WebRTCServer::HandleFile(
     doc.Accept(writer);
     if (!toWs->second->send(buffer.GetString())) {
         Logger::error() << "Error encountered making offer to \'" << peerId << "\'.";
+        return false;
     }
+
+    return true;
 }
 
 
@@ -237,15 +245,99 @@ WebRTCServer::OnFileOffer(
         static_cast<size_t>(doc["file"]["size"].GetInt64()),
         doc["file"]["mimeType"].GetString()
     };
+
     auto ws = CurrentWebSocket();
     if (!ws) {
+        Logger::error() << "Invalid websocket.";
         return;
     }
-    Logger::info() << "File offer from \'" << ws->getUserData()->x_client_id
-                   << "\', to \'" << doc["peer"].GetString() << "\': " << file.name;
-    HandleFile(doc, file);
+
+    std::string id = ws->getUserData()->x_client_id;
+
+    Logger::info()
+        << "File offer from \'"
+        << id
+        << "\', to \'"
+        << doc["peer"].GetString()
+        << "\': "
+        << file.name;
+
+    if (m_clientStateDB[id] == ClientState::CLIENT_FILE_SEND) {
+        Logger::error()
+            << "User \'"
+            << id
+            << "\" already in CLIENT_FILE_SEND state!";
+        return;
+    }
+
+    if (HandleFile(doc, file)) {
+        m_clientStateDB[id] = ClientState::CLIENT_FILE_SEND;
+    }
 }
 
+
+void
+WebRTCServer::OnAnswer(
+    rapidjson::Document& doc
+) {
+    Logger::info() << "OnAnswer.";
+
+    if (!doc.HasMember("peer") || !doc["peer"].IsString() ||
+        !doc.HasMember("sdp") || !doc["sdp"].IsString()) {
+        Logger::error() << "Invalid answer command format";
+        return;
+    }
+
+    std::string peer = doc["peer"].GetString();
+
+    auto ws = m_clientDB.find(peer);
+    if (ws == m_clientDB.end()) {
+        Logger::error() << "User: " + peer + " not found.";
+        return;
+    }
+
+    doc.EraseMember("peer");
+    
+    rapidjson::StringBuffer buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    doc.Accept(writer);
+    if (!ws->second->send(buffer.GetString())) {
+        Logger::error() << "Error encountered forwarding answer to \'" << peer << "\'.";
+        return;
+    }
+}
+
+
+void
+WebRTCServer::OnCandidate(
+    rapidjson::Document& doc
+) {
+    Logger::info() << "OnCandidate.";
+
+    if (!doc.HasMember("peer") || !doc["peer"].IsString() ||
+        !doc.HasMember("candidate") || !doc["candidate"].IsString()) {
+        Logger::error() << "Invalid candidate command format";
+        return;
+    }
+
+    std::string peer = doc["peer"].GetString();
+
+    auto ws = m_clientDB.find(peer);
+    if (ws == m_clientDB.end()) {
+        Logger::error() << "User: " + peer + " not found.";
+        return;
+    }
+
+    doc.EraseMember("peer");
+    
+    rapidjson::StringBuffer buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    doc.Accept(writer);
+    if (!ws->second->send(buffer.GetString())) {
+        Logger::error() << "Error encountered forwarding answer to \'" << peer << "\'.";
+        return;
+    }
+}
 
 
 /**
@@ -264,13 +356,34 @@ WebRTCServer::OnFileAccept(
     }
 
     FileDetails file{doc["file"]["name"].GetString(), 0, ""};
+
     auto ws = CurrentWebSocket();
     if (!ws) {
+        Logger::error() << "Invalid websocket.";
         return;
     }
-    Logger::info() << "File offer accept from \'" << ws->getUserData()->x_client_id
-                   << "\', to \'" << doc["to"].GetString() << "\': " << file.name;
-    HandleFile(doc, file);
+
+    std::string id = ws->getUserData()->x_client_id;
+
+    Logger::info()
+        << "File offer accept from \'"
+        << id
+        << "\', to \'"
+        << doc["to"].GetString()
+        << "\': "
+        << file.name;
+
+    if (m_clientStateDB[id] == ClientState::CLIENT_WAIT_FOR_FILE) {
+        Logger::error()
+            << "User \'"
+            << id
+            << "\" already in CLIENT_WAIT_FOR_FILE state!";
+        return;
+    }
+
+    if (HandleFile(doc, file)) {
+        m_clientStateDB[id] = ClientState::CLIENT_WAIT_FOR_FILE;
+    }
 }
 
 
