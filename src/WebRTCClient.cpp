@@ -28,6 +28,7 @@
  */
 
 
+
 /**
  * @brief Sends a room-join request to the message server.
  *
@@ -62,8 +63,10 @@ WebRTCClient::JoinRoom(
         << "Requested to join room \'"
         << room
         << "\'.";
+
     return true;
 }
+
 
 
 /**
@@ -78,19 +81,6 @@ WebRTCClient::JoinRoom(
  * @param room Room containing the sender and recipient.
  * @param peer Identifier of the intended recipient.
  * @param fileDetails Path or file specification passed to MimeDetector.
- */
-/**
- * @brief Sends a file-accept acknowledgement to the sender.
- *
- * The acceptance payload identifies the room, the sender, and the file
- * metadata so the remote client can continue the peer-to-peer connection
- * flow and proceed with the transfer. The file details are serialized as a
- * JSON object using `MimeDetector` before dispatching over the signalling
- * channel.
- *
- * @param room Room containing both peers.
- * @param peer Identifier of the sending peer.
- * @param fileDetails Path to the file being accepted.
  */
 void
 WebRTCClient::SendFileAccept(
@@ -112,6 +102,22 @@ WebRTCClient::SendFileAccept(
     }
 }
 
+
+
+/**
+ * @brief Builds a file-transfer offer and sends it over the signalling channel.
+ *
+ * The function creates a fresh peer connection, configures the STUN server, and
+ * gathers the initial SDP and ICE candidates required to establish the data
+ * channel. Once the local description is ready, it serializes a JSON `file_offer`
+ * payload with the room, target peer, file metadata, description, and candidate
+ * information and sends it to the message relay. After the channel opens, the
+ * sender streams the actual file bytes over the data channel in bounded chunks.
+ *
+ * @param room Room containing the sender and recipient.
+ * @param peer Identifier of the intended peer receiving the offer.
+ * @param fileDetails Path to the file that will be transferred.
+ */
 void
 WebRTCClient::SendFileOffer(
     const std::string&  room,
@@ -264,6 +270,7 @@ WebRTCClient::SendFileOffer(
 }
 
 
+
 /**
  * @brief Sends a lightweight keepalive ping to the message server.
  *
@@ -282,6 +289,7 @@ WebRTCClient::SendPing() {
     }
     return true;
 }
+
 
 
 /**
@@ -327,6 +335,8 @@ WebRTCClient::OnJoin(
     }
 }
 
+
+
 /**
  * @brief Handles a server leave event.
  *
@@ -356,13 +366,13 @@ WebRTCClient::OnLeave(
     WebRTC::Leave(peer, room);
 }
 
+
+
 /**
- * @brief Applies a remote file-accept reply.
+ * @brief Handles a file-accept notification.
  *
- * When the remote side accepts a pending transfer it sends the negotiated SDP
- * answer and any trickle-ICE candidates. This handler decodes each payload,
- * applies the answer to the active peer connection, and adds the candidate
- * data so the connection can complete before any file data is exchanged.
+ * This handler currently logs the notification only; the document is not yet
+ * used to update a peer connection or continue a file transfer.
  *
  * @param doc JSON payload describing the accepted file transfer.
  */
@@ -417,6 +427,17 @@ WebRTCClient::OnFileAccept(
 }
 
 
+
+/**
+ * @brief Applies a remote SDP answer for an established peer connection.
+ *
+ * The signalling server forwards the remote side's SDP answer as a Base64-encoded
+ * string. This handler decodes that payload, validates the presence of an active
+ * peer connection, and sets the remote description so the data channel can finish
+ * the WebRTC handshake.
+ *
+ * @param doc JSON payload containing the answer SDP.
+ */
 void
 WebRTCClient::OnAnswer(
     rapidjson::Document& doc
@@ -445,6 +466,17 @@ WebRTCClient::OnAnswer(
 }
 
 
+
+/**
+ * @brief Adds a remote ICE candidate to the active peer connection.
+ *
+ * Trickled ICE candidates are sent over the signalling channel as Base64-encoded
+ * strings and a media ID. The handler validates the fields, decodes the
+ * candidate, and registers it with the current RTCPeerConnection so the WebRTC
+ * negotiation can complete as ICE gathering continues.
+ *
+ * @param doc JSON payload containing the remote ICE candidate and MID.
+ */
 void
 WebRTCClient::OnCandidate(
     rapidjson::Document& doc
@@ -475,16 +507,16 @@ WebRTCClient::OnCandidate(
 }
 
 
+
 /**
- * @brief Handles an incoming file-offer payload.
+ * @brief Handles a file-offer event.
  *
- * The client creates a peer connection, configures the data-channel callbacks,
- * and applies the remote offer details contained in the message. It also sends
- * trickle-ICE and answer metadata back to the signalling server so the offer can
- * be completed by the remote party.
+ * The current implementation initializes a peer connection with the
+ * configured STUN server and gathers an initial local description. It does
+ * not yet read the offer document or apply remote descriptions/candidates.
  *
- * @param doc JSON payload containing the file metadata and the remote offer SDP
- *            and candidate data.
+ * @param doc JSON payload containing the offered file metadata and signaling
+ *            data; currently unused by this implementation.
  */
 void
 WebRTCClient::OnFileOffer(
@@ -640,6 +672,7 @@ WebRTCClient::OnFileOffer(
 }
 
 
+
 /**
  * @brief Handles a ping/pong response from the message server.
  *
@@ -700,6 +733,8 @@ WebRTCClient::OnMessageOpen(
     m_clientStateChanged.notify_all();
 }
 
+
+
 /**
  * @brief Handles closure of the underlying message transport.
  *
@@ -725,6 +760,8 @@ WebRTCClient::OnMessageClose(
     m_clientStateChanged.notify_all();
 }
 
+
+
 /**
  * @brief Stops the client when it is destroyed.
  *
@@ -734,6 +771,8 @@ WebRTCClient::OnMessageClose(
 WebRTCClient::~WebRTCClient() {
     Stop();
 }
+
+
 
 /**
  * @brief Starts the message transport and the client worker thread.
@@ -760,6 +799,8 @@ WebRTCClient::Start() {
     return true;
 }
 
+
+
 /**
  * @brief Requests client shutdown and joins its worker thread.
  *
@@ -780,6 +821,8 @@ WebRTCClient::Stop() {
     }
 }
 
+
+
 /**
  * @brief Reports whether the client worker has not entered its exit state.
  *
@@ -793,6 +836,8 @@ WebRTCClient::IsRunning() {
     std::lock_guard<std::mutex> lock(m_clientStateMutex);
     return m_clientState != ClientState::CLIENT_EXIT;
 }
+
+
 
 /**
  * @brief Runs the client lifecycle and keepalive state machine.
@@ -938,3 +983,4 @@ WebRTCClient::StartClient() {
         });
     }
 }
+
