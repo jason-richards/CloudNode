@@ -134,6 +134,11 @@ WebRTCClient::SendFileOffer(
         << "\'.";
 
     rtc::Configuration config;
+    const size_t maxMessageSize = Properties().Contains("maxMessageSize")
+        ? static_cast<size_t>(Properties().Get<int>("maxMessageSize"))
+        : 2 * 1024 * 1024;
+    config.maxMessageSize = maxMessageSize;
+
     std::string stunServer;
 
     auto stunAddress = Properties().Get<std::string>("stunAddress");
@@ -154,7 +159,7 @@ WebRTCClient::SendFileOffer(
         return;
     }
 
-    m_dc->onOpen([fileDetails, weakChannel = rtc::weak_ptr(m_dc)]() {
+    m_dc->onOpen([fileDetails, maxMessageSize, weakChannel = rtc::weak_ptr(m_dc)]() {
         Logger::info() << "Offering DataChannel open!";
 
         auto channel = weakChannel.lock();
@@ -170,20 +175,19 @@ WebRTCClient::SendFileOffer(
         };
 
         auto transfer = std::make_shared<TransferState>();
-        constexpr size_t bufferedLimit = 16 * 1024;
-        channel->setBufferedAmountLowThreshold(bufferedLimit / 2);
+
+        channel->setBufferedAmountLowThreshold(maxMessageSize/2);
         channel->onBufferedAmountLow([transfer]() {
             transfer->changed.notify_one();
         });
+
         channel->onClosed([transfer]() {
-            {
-                std::lock_guard<std::mutex> lock(transfer->mutex);
-                transfer->closed = true;
-            }
+            std::lock_guard<std::mutex> lock(transfer->mutex);
+            transfer->closed = true;
             transfer->changed.notify_one();
         });
 
-        std::thread([fileDetails, channel, transfer]() {
+        std::thread([fileDetails, channel, transfer, maxMessageSize]() {
             std::ifstream file(fileDetails, std::ios::binary);
             if (!file) {
                 Logger::error() << "Unable to open file for transfer: " << fileDetails;
@@ -191,45 +195,41 @@ WebRTCClient::SendFileOffer(
             }
 
             auto waitForCapacity = [&]() {
+                Logger::info() << "Waiting for capacity: " << channel->bufferedAmount();
                 std::unique_lock<std::mutex> lock(transfer->mutex);
-                transfer->changed.wait(lock, [&]() {
-                    return transfer->closed || !channel->isOpen() ||
-                           channel->bufferedAmount() <= 16 * 1024;
-                });
+
+                transfer->changed.wait(lock,
+                    [&]() {
+                        return transfer->closed || !channel->isOpen() ||
+                           channel->bufferedAmount() <= (maxMessageSize / 2);
+                    }
+                );
+
                 return !transfer->closed && channel->isOpen();
             };
 
-            std::array<char, 16 * 1024> buffer{};
-            std::uint64_t sentBytes = 0;
-            while (true) {
-                file.clear();
-                file.seekg(static_cast<std::streamoff>(sentBytes));
-                if (!file) {
-                    Logger::error() << "Unable to seek file during transfer: " << fileDetails;
-                    return;
-                }
+            rtc::binary chunk(maxMessageSize);
 
-                file.read(buffer.data(), buffer.size());
-                const auto bytesRead = file.gcount();
-                if (bytesRead <= 0) {
-                    break;
-                }
+            while (file.read(reinterpret_cast<char*>(chunk.data()), chunk.size()) || file.gcount() > 0) {
+                auto bytesRead = file.gcount();
 
-                rtc::binary chunk(static_cast<size_t>(bytesRead));
-                std::memcpy(chunk.data(), buffer.data(), static_cast<size_t>(bytesRead));
-                bool chunkAccepted = false;
-                while (!chunkAccepted) {
-                    if (channel->bufferedAmount() <= bufferedLimit) {
-                        chunkAccepted = channel->send(chunk);
-                    }
-                    if (chunkAccepted) {
-                        sentBytes += static_cast<std::uint64_t>(bytesRead);
-                        break;
-                    }
+                while (channel->bufferedAmount() > maxMessageSize) {
                     if (!waitForCapacity()) {
                         Logger::warn() << "Data channel closed before file transfer completed.";
                         return;
                     }
+                }
+
+                Logger::info()
+                    << "Sending "
+                    << bytesRead;
+
+                if (!channel->send(chunk.data(), bytesRead)) {
+                    if (!waitForCapacity()) {
+                        Logger::warn() << "Data channel closed before file transfer completed.";
+                        return;
+                    }
+                    continue;
                 }
             }
 
@@ -237,6 +237,7 @@ WebRTCClient::SendFileOffer(
                 Logger::error() << "Error reading file during transfer: " << fileDetails;
                 return;
             }
+
             Logger::info() << "File data sent: " << fileDetails;
         }).detach();
     });
@@ -526,6 +527,11 @@ WebRTCClient::OnFileOffer(
     Logger::info() << "OnFileOffer";
 
     rtc::Configuration config;
+    const size_t maxMessageSize = Properties().Contains("maxMessageSize")
+        ? static_cast<size_t>(Properties().Get<int>("maxMessageSize"))
+        : 2 * 1024 * 1024;
+    config.maxMessageSize = maxMessageSize;
+
     std::string stunServer;
 
     auto stunAddress = Properties().Get<std::string>("stunAddress");

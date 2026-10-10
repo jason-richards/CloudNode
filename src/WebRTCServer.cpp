@@ -275,7 +275,15 @@ WebRTCServer::OnFileOffer(
     }
 }
 
-
+/**
+ * @brief Forwards a remote WebRTC answer to the intended peer.
+ *
+ * The server receives an SDP answer from one client and relays it to the
+ * destination client across the signalling channel. The payload is validated,
+ * the peer field is removed, and the remaining JSON is sent to the recipient.
+ *
+ * @param doc Parsed answer payload containing the target peer and SDP text.
+ */
 void
 WebRTCServer::OnAnswer(
     rapidjson::Document& doc
@@ -307,7 +315,15 @@ WebRTCServer::OnAnswer(
     }
 }
 
-
+/**
+ * @brief Relays an ICE candidate update to the target peer.
+ *
+ * Trickled ICE candidates arrive from a client as a candidate payload and a MID.
+ * The server validates the packet, removes the forwarding metadata, and sends the
+ * candidate to the peer that needs it to continue NAT traversal and connectivity.
+ *
+ * @param doc Parsed candidate payload containing the destination peer and ICE data.
+ */
 void
 WebRTCServer::OnCandidate(
     rapidjson::Document& doc
@@ -315,7 +331,8 @@ WebRTCServer::OnCandidate(
     Logger::info() << "OnCandidate.";
 
     if (!doc.HasMember("peer") || !doc["peer"].IsString() ||
-        !doc.HasMember("candidate") || !doc["candidate"].IsString()) {
+        !doc.HasMember("candidate") || !doc["candidate"].IsString() ||
+        !doc.HasMember("mid") || !doc["mid"].IsString()) {
         Logger::error() << "Invalid candidate command format";
         return;
     }

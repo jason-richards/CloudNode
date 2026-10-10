@@ -74,6 +74,7 @@ main(
     properties.Set("version", params.version());
     properties.Set("name", name);
     properties.Set("timeout", params.timeout());
+    properties.Set("maxMessageSize", 2 * 1024 * 1024);
 
     Logger::info() << "'" << name << "' is coming online.";
 
