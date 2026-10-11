@@ -2,7 +2,7 @@
 **
 ** parse_cl.cpp
 **
-** Wed Sep 30 10:21:07 2026
+** Sat Oct 10 20:58:12 2026
 ** Linux 6.8.0-51-generic (#52-Ubuntu SMP PREEMPT_DYNAMIC Thu Dec  5 13:09:44 UTC 2024) x86_64
 ** jrichard@SpinRun42 (Jason Richards)
 **
@@ -36,6 +36,7 @@ Cmdline::Cmdline (int argc, char *argv[])
   {
     {"server", no_argument, NULL, 's'},
     {"timeout", required_argument, NULL, 't'},
+    {"maxMessageSize", required_argument, NULL, 'm'},
     {"messageAddress", required_argument, NULL, 256},
     {"messagePort", required_argument, NULL, 257},
     {"stunAddress", required_argument, NULL, 258},
@@ -55,6 +56,7 @@ Cmdline::Cmdline (int argc, char *argv[])
   /* default values */
   _server = false;
   _timeout = 10;
+  _maxMessageSize = 2097152;
   _messageAddress = "ws://localhost";
   _messagePort = 8080;
   _stunAddress = "stun.l.google.com";
@@ -64,7 +66,7 @@ Cmdline::Cmdline (int argc, char *argv[])
   _version = false;
 
   optind = 0;
-  while ((c = getopt_long (argc, argv, "st:n:p:d:r:f:hv", long_options, &optind)) != - 1)
+  while ((c = getopt_long (argc, argv, "st:m:n:p:d:r:f:hv", long_options, &optind)) != - 1)
     {
       switch (c)
         {
@@ -74,6 +76,10 @@ Cmdline::Cmdline (int argc, char *argv[])
 
         case 't': 
           _timeout = atoi (optarg);
+          break;
+
+        case 'm': 
+          _maxMessageSize = atoi (optarg);
           break;
 
         case 256: 
@@ -151,6 +157,8 @@ WebRTC file transfer client/server.\n\
           start in server mode\n\
    [ -t ] [ --timeout ] (type=INTEGER, default=10)\n\
           ping/pong timeout interval.\n\
+   [ -m ] [ --maxMessageSize ] (type=INTEGER, default=2097152)\n\
+          message buffer size (2MB default).\n\
    [ --messageAddress ] (type=STRING, default=ws://localhost)\n\
           message server hostname or IP address\n\
    [ --messagePort ] (type=INTEGER, default=8080)\n\

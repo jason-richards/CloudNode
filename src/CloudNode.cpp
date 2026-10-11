@@ -61,20 +61,20 @@ main(
     }
 
     PropertyBag properties;
-    properties.Set("messageAddress", params.messageAddress());
-    properties.Set("messagePort", params.messagePort());
-    properties.Set("stunAddress", params.stunAddress());
-    properties.Set("stunPort", params.stunPort());
-    properties.Set("server", params.server());
-    properties.Set("directory", params.directory());
-    properties.Set("room", params.room());
-    properties.Set("peer", params.peer());
-    properties.Set("file", params.file());
-    properties.Set("help", params.help());
-    properties.Set("version", params.version());
-    properties.Set("name", name);
-    properties.Set("timeout", params.timeout());
-    properties.Set("maxMessageSize", 2 * 1024 * 1024);
+    properties.Set("messageAddress",    params.messageAddress());
+    properties.Set("messagePort",       params.messagePort());
+    properties.Set("stunAddress",       params.stunAddress());
+    properties.Set("stunPort",          params.stunPort());
+    properties.Set("server",            params.server());
+    properties.Set("directory",         params.directory());
+    properties.Set("room",              params.room());
+    properties.Set("peer",              params.peer());
+    properties.Set("file",              params.file());
+    properties.Set("help",              params.help());
+    properties.Set("version",           params.version());
+    properties.Set("name",              name);
+    properties.Set("timeout",           params.timeout());
+    properties.Set("maxMessageSize",    params.maxMessageSize());
 
     Logger::info() << "'" << name << "' is coming online.";
 

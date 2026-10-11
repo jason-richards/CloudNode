@@ -70,41 +70,6 @@ WebRTCClient::JoinRoom(
 
 
 /**
- * @brief Creates and sends the client's initial file offer.
- *
- * Builds a peer connection using the configured STUN server, gathers an
- * initial local description, obtains file metadata, and sends a JSON
- * `file_offer` message containing the room, recipient, metadata, description,
- * and ICE candidates. The recipient identifier must match the name with which
- * that peer connected to the message server.
- *
- * @param room Room containing the sender and recipient.
- * @param peer Identifier of the intended recipient.
- * @param fileDetails Path or file specification passed to MimeDetector.
- */
-void
-WebRTCClient::SendFileAccept(
-    const std::string& room,
-    const std::string& peer,
-    const std::string& fileDetails
-) {
-    MimeDetector md;
-    const std::string fileMeta = md.get_file_info(fileDetails);
-
-    std::ostringstream payload;
-    payload << "{ \"type\" : \"file_accept\", "
-            << "\"room\" : \"" << room << "\", "
-            << "\"peer\" : \"" << peer << "\", "
-            << "\"file\" : " << fileMeta << " }";
-
-    if (!SendMessage(payload.str())) {
-        Logger::error() << "Unable to send file_accept command for room '" << room << "'.";
-    }
-}
-
-
-
-/**
  * @brief Builds a file-transfer offer and sends it over the signalling channel.
  *
  * The function creates a fresh peer connection, configures the STUN server, and
@@ -133,10 +98,18 @@ WebRTCClient::SendFileOffer(
         << fileDetails
         << "\'.";
 
+    MimeDetector md;
+    std::string fdsc;
+
+    if (!md.get_file_info(fileDetails, fdsc)) {
+        Logger::error()
+            << "Error: "
+            << fdsc;
+        return;
+    }
+
     rtc::Configuration config;
-    const size_t maxMessageSize = Properties().Contains("maxMessageSize")
-        ? static_cast<size_t>(Properties().Get<int>("maxMessageSize"))
-        : 2 * 1024 * 1024;
+    const auto maxMessageSize = static_cast<size_t>(Properties().Get<int>("maxMessageSize"));
     config.maxMessageSize = maxMessageSize;
 
     std::string stunServer;
@@ -195,9 +168,7 @@ WebRTCClient::SendFileOffer(
             }
 
             auto waitForCapacity = [&]() {
-                Logger::info() << "Waiting for capacity: " << channel->bufferedAmount();
                 std::unique_lock<std::mutex> lock(transfer->mutex);
-
                 transfer->changed.wait(lock,
                     [&]() {
                         return transfer->closed || !channel->isOpen() ||
@@ -248,8 +219,6 @@ WebRTCClient::SendFileOffer(
         }
     });
 
-    MimeDetector md;
-    auto fdsc = md.get_file_info(fileDetails);
 
     std::string payload = "";
     payload += "{\"type\" : \"file_offer\", ";
@@ -523,14 +492,10 @@ void
 WebRTCClient::OnFileOffer(
     rapidjson::Document& doc
 ) {
-    (void) doc;
     Logger::info() << "OnFileOffer";
 
     rtc::Configuration config;
-    const size_t maxMessageSize = Properties().Contains("maxMessageSize")
-        ? static_cast<size_t>(Properties().Get<int>("maxMessageSize"))
-        : 2 * 1024 * 1024;
-    config.maxMessageSize = maxMessageSize;
+    config.maxMessageSize = static_cast<size_t>(Properties().Get<int>("maxMessageSize"));
 
     std::string stunServer;
 

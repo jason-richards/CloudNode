@@ -108,28 +108,34 @@ public:
      *         {"name": "example.pdf", "size": 12345, "mimeType": "application/pdf"}
      *         or an error object on failure.
      */
-    inline std::string get_file_info(const std::string& filename) {
+    inline bool
+    get_file_info (
+        const std::string& filename,
+        std::string & info
+    ) {
         try {
-            std::string mimeType = get_mime_type(filename);
+            info = get_mime_type(filename);
 
-            // Get file size
             std::uintmax_t size = fs::file_size(filename);
 
             // Construct JSON string
-            return 
+            info = 
                 "{\"name\": \""
                 + filename 
                 + "\", \"size\": "
                 + std::to_string(size)
                 + ", \"mimeType\": \""
-                + mimeType
+                + info
                 + "\"}";
+            return true;
         } catch (const std::exception& e) {
             // Return a JSON error response if any exception occurs
-            return "{\"error\": \"" + std::string(e.what()) + "\"}";
+            info = "{\"error\": \"" + std::string(e.what()) + "\"}";
         } catch (...) {
-            return "{\"error\": \"Unknown error occurred\"}";
+            info =  "{\"error\": \"Unknown error occurred\"}";
         }
+
+        return false;
     }
 
 private:

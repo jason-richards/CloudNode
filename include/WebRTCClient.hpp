@@ -98,12 +98,6 @@ public:
         const std::string&  fileDetails
     );
 
-    void
-    SendFileAccept(
-        const std::string&  room,
-        const std::string&  peer,
-        const std::string&  fileDetails
-    );
 
 protected:
 
