@@ -304,7 +304,19 @@ WebRTCServer::OnAnswer(
         return;
     }
 
+    auto source = CurrentWebSocket();
+    if (!source) {
+        Logger::error() << "Invalid websocket forwarding answer.";
+        return;
+    }
+    const std::string from = source->getUserData()->x_client_id;
+
     doc.EraseMember("peer");
+    doc.AddMember(
+        rapidjson::Value("from", doc.GetAllocator()),
+        rapidjson::Value(from.c_str(), doc.GetAllocator()),
+        doc.GetAllocator()
+    );
     
     rapidjson::StringBuffer buffer;
     rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
@@ -345,7 +357,19 @@ WebRTCServer::OnCandidate(
         return;
     }
 
+    auto source = CurrentWebSocket();
+    if (!source) {
+        Logger::error() << "Invalid websocket forwarding candidate.";
+        return;
+    }
+    const std::string from = source->getUserData()->x_client_id;
+
     doc.EraseMember("peer");
+    doc.AddMember(
+        rapidjson::Value("from", doc.GetAllocator()),
+        rapidjson::Value(from.c_str(), doc.GetAllocator()),
+        doc.GetAllocator()
+    );
     
     rapidjson::StringBuffer buffer;
     rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);

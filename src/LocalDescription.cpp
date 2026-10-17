@@ -319,12 +319,11 @@ LocalDescription::toJson() const {
  */
 bool
 obtainInitialDescription(
-    std::shared_ptr<rtc::PeerConnection> pc,
-    std::shared_ptr<rtc::DataChannel>& channel,
+    DataChannel& dataChannel,
     LocalDescription &desc,
     int time_out
 ) {
-    if (!pc) return false;
+    if (!dataChannel.pc) return false;
 
     struct GatheredDescription {
         std::mutex mutex;
@@ -334,7 +333,7 @@ obtainInitialDescription(
     };
     auto gathered = std::make_shared<GatheredDescription>();
 
-    pc->onGatheringStateChange([gathered](rtc::PeerConnection::GatheringState state) {
+    dataChannel.pc->onGatheringStateChange([gathered](rtc::PeerConnection::GatheringState state) {
         if (state == rtc::PeerConnection::GatheringState::Complete) {
             {
                 std::lock_guard<std::mutex> lock(gathered->mutex);
@@ -344,18 +343,18 @@ obtainInitialDescription(
         }
     });
 
-    pc->onLocalDescription([gathered](rtc::Description description) {
+    dataChannel.pc->onLocalDescription([gathered](rtc::Description description) {
         std::lock_guard<std::mutex> lock(gathered->mutex);
         gathered->description.descriptions.emplace_back(std::string(description));
     });
 
-    pc->onLocalCandidate([gathered](rtc::Candidate candidate) {
+    dataChannel.pc->onLocalCandidate([gathered](rtc::Candidate candidate) {
         std::lock_guard<std::mutex> lock(gathered->mutex);
         gathered->description.candidates.emplace_back(std::string(candidate));
     });
 
-    channel = pc->createDataChannel("File Transfer");
-    if (!channel) {
+    dataChannel.channel = dataChannel.pc->createDataChannel("File Transfer");
+    if (!dataChannel.channel) {
         return false;
     }
 
@@ -369,6 +368,11 @@ obtainInitialDescription(
 
     desc = gathered->description;
 
-    return !desc.descriptions.empty();
+    if (desc.descriptions.empty()) {
+        return false;
+    }
+
+    dataChannel.fileQ = CreateStringQueue();
+    return static_cast<bool>(dataChannel.fileQ);
 }
 
