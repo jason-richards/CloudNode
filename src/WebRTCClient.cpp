@@ -13,6 +13,16 @@
 #include <cstring>
 #include <fstream>
 
+std::shared_ptr<rtc::PeerConnection>
+WebRTCClient::FindPeerConnection(
+    const std::string& peer,
+    const std::string& room
+) const {
+    std::lock_guard<std::mutex> lock(m_dataChannelsMutex);
+    auto it = m_dataChannels.find({peer, room});
+    return it == m_dataChannels.end() ? nullptr : it->second.pc;
+}
+
 /**
  * @file WebRTCClient.cpp
  * @brief Client-side WebRTC messaging implementation.
@@ -94,19 +104,25 @@ WebRTCClient::MakeDataChannel(
     config.iceServers.emplace_back(stunServer);
 
     Logger::info() << stunServer;
-    m_pc = std::make_shared<rtc::PeerConnection>(config);
+    DataChannel dataChannel;
+    dataChannel.pc = std::make_shared<rtc::PeerConnection>(config);
     LocalDescription desc;
 
-    if (!obtainInitialDescription(m_pc, m_dc, desc)) {
+    if (!obtainInitialDescription(dataChannel, desc)) {
         Logger::warn() << "Failed to get initial description.";
         return false;
     }
+    auto channel = dataChannel.channel;
+    {
+        std::lock_guard<std::mutex> lock(m_dataChannelsMutex);
+        m_dataChannels.insert_or_assign({peer, room}, std::move(dataChannel));
+    }
 
-    m_dc->onOpen([maxMessageSize, weakChannel = rtc::weak_ptr(m_dc)]() {
+    channel->onOpen([maxMessageSize, weakChannel = rtc::weak_ptr(channel)]() {
         Logger::info() << "Offering DataChannel open!";
     });
 
-    m_dc->onMessage([](std::variant<rtc::binary, std::string> message) {
+    channel->onMessage([](std::variant<rtc::binary, std::string> message) {
         if (std::holds_alternative<std::string>(message)) {
             Logger::info() << "Received: " << std::get<std::string>(message);
         }
@@ -172,15 +188,21 @@ WebRTCClient::SendFileOffer(
     config.iceServers.emplace_back(stunServer);
 
     Logger::info() << stunServer;
-    m_pc = std::make_shared<rtc::PeerConnection>(config);
+    DataChannel dataChannel;
+    dataChannel.pc = std::make_shared<rtc::PeerConnection>(config);
     LocalDescription desc;
 
-    if (!obtainInitialDescription(m_pc, m_dc, desc)) {
+    if (!obtainInitialDescription(dataChannel, desc)) {
         Logger::warn() << "Failed to get initial description.";
         return;
     }
+    auto channel = dataChannel.channel;
+    {
+        std::lock_guard<std::mutex> lock(m_dataChannelsMutex);
+        m_dataChannels.insert_or_assign({peer, room}, std::move(dataChannel));
+    }
 
-    m_dc->onOpen([fileDetails, maxMessageSize, weakChannel = rtc::weak_ptr(m_dc)]() {
+    channel->onOpen([fileDetails, maxMessageSize, weakChannel = rtc::weak_ptr(channel)]() {
         Logger::info() << "Offering DataChannel open!";
 
         auto channel = weakChannel.lock();
@@ -261,7 +283,7 @@ WebRTCClient::SendFileOffer(
         }).detach();
     });
 
-    m_dc->onMessage([](std::variant<rtc::binary, std::string> message) {
+    channel->onMessage([](std::variant<rtc::binary, std::string> message) {
         if (std::holds_alternative<std::string>(message)) {
             Logger::info() << "Received: " << std::get<std::string>(message);
         }
@@ -407,7 +429,12 @@ WebRTCClient::OnFileAccept(
         return;
     }
 
-    if (!m_pc) {
+    const std::string peer = doc.HasMember("from") && doc["from"].IsString()
+        ? doc["from"].GetString() : m_peer;
+    const std::string room = doc.HasMember("room") && doc["room"].IsString()
+        ? doc["room"].GetString() : m_room;
+    auto peerConnection = FindPeerConnection(peer, room);
+    if (!peerConnection) {
         Logger::error() << "Received file accept with no active peer connection.";
         return;
     }
@@ -424,7 +451,7 @@ WebRTCClient::OnFileAccept(
         }
 
         Logger::info() << "Applying remote answer: " << sdp;
-        m_pc->setRemoteDescription(rtc::Description(sdp, "answer"));
+        peerConnection->setRemoteDescription(rtc::Description(sdp, "answer"));
     }
 
     if (doc.HasMember("candidates") && doc["candidates"].IsArray()) {
@@ -441,7 +468,7 @@ WebRTCClient::OnFileAccept(
             }
 
             Logger::info() << "Adding accepted remote candidate: " << candidate;
-            m_pc->addRemoteCandidate(rtc::Candidate(candidate, "0"));
+            peerConnection->addRemoteCandidate(rtc::Candidate(candidate, "0"));
         }
     }
 }
@@ -464,7 +491,13 @@ WebRTCClient::OnAnswer(
 ) {
     Logger::info() << "OnAnswer.";
 
-    if (!m_pc) {
+    const std::string peer = doc.HasMember("from") && doc["from"].IsString()
+        ? doc["from"].GetString()
+        : (doc.HasMember("peer") && doc["peer"].IsString() ? doc["peer"].GetString() : m_peer);
+    const std::string room = doc.HasMember("room") && doc["room"].IsString()
+        ? doc["room"].GetString() : m_room;
+    auto peerConnection = FindPeerConnection(peer, room);
+    if (!peerConnection) {
         Logger::error() << "Received datachannel answer command with no active peer connection.";
         return;
     }
@@ -481,7 +514,7 @@ WebRTCClient::OnAnswer(
         return;
     }
 
-    m_pc->setRemoteDescription(rtc::Description(description, "answer"));
+    peerConnection->setRemoteDescription(rtc::Description(description, "answer"));
 
     Logger::info() << "Successfully set SDP.";
 }
@@ -504,7 +537,13 @@ WebRTCClient::OnCandidate(
 ) {
     Logger::info() << "OnCandidate";
 
-    if (!m_pc) {
+    const std::string peer = doc.HasMember("from") && doc["from"].IsString()
+        ? doc["from"].GetString()
+        : (doc.HasMember("peer") && doc["peer"].IsString() ? doc["peer"].GetString() : m_peer);
+    const std::string room = doc.HasMember("room") && doc["room"].IsString()
+        ? doc["room"].GetString() : m_room;
+    auto peerConnection = FindPeerConnection(peer, room);
+    if (!peerConnection) {
         Logger::error() << "Received remote candidate without an active peer connection.";
         return;
     }
@@ -524,7 +563,7 @@ WebRTCClient::OnCandidate(
         << ", mid="
         << mid;
 
-    m_pc->addRemoteCandidate(rtc::Candidate(candidate, mid));
+    peerConnection->addRemoteCandidate(rtc::Candidate(candidate, mid));
 }
 
 
@@ -561,21 +600,34 @@ WebRTCClient::OnFileOffer(
 
     Logger::info() << stunServer;
 
-    m_pc = std::make_shared<rtc::PeerConnection>(config);
-
-    if (!doc.HasMember("from") || !doc["from"].IsString()) {
-        Logger::warn() << "FileOffer with no from field.";
+    if (!doc.HasMember("from") || !doc["from"].IsString() ||
+        !doc.HasMember("room") || !doc["room"].IsString()) {
+        Logger::warn() << "FileOffer is missing its sender or room.";
         return;
     }
 
     std::string from = doc["from"].GetString();
-    m_pc->onDataChannel([this, from](std::shared_ptr<rtc::DataChannel> dc) {
+    std::string room = doc["room"].GetString();
+    PeerRoomKey key{from, room};
+    DataChannel dataChannel;
+    dataChannel.pc = std::make_shared<rtc::PeerConnection>(config);
+    dataChannel.fileQ = CreateStringQueue();
+    auto peerConnection = dataChannel.pc;
+    {
+        std::lock_guard<std::mutex> lock(m_dataChannelsMutex);
+        m_dataChannels.insert_or_assign(key, dataChannel);
+    }
+
+    peerConnection->onDataChannel([this, key, from, weakPeerConnection = rtc::weak_ptr(peerConnection)](std::shared_ptr<rtc::DataChannel> dc) {
         {
-            std::lock_guard<std::mutex> lock(m_clientStateMutex);
-            m_dc = dc;
+            std::lock_guard<std::mutex> lock(m_dataChannelsMutex);
+            auto it = m_dataChannels.find(key);
+            if (it != m_dataChannels.end()) {
+                it->second.channel = dc;
+            }
         }
 
-        dc->onOpen([weakPeerConnection = rtc::weak_ptr(m_pc)]() {
+        dc->onOpen([weakPeerConnection]() {
             Logger::info() << "onOpen: Incoming file data channel opened.";
 
             rtc::Candidate local;
@@ -623,11 +675,13 @@ WebRTCClient::OnFileOffer(
 
 
     // 2. Set up local candidate callback (trickle ICE)
-    m_pc->onLocalCandidate([this, from](rtc::Candidate candidate) {
+    peerConnection->onLocalCandidate([this, from, room](rtc::Candidate candidate) {
         std::ostringstream payload;
         payload << "{ \"type\" : \"candidate\", "
                 << "\"peer\" : \""
                 << from
+                << "\", \"room\" : \""
+                << room
                 << "\", \"candidate\" : \""
                 << candidate.candidate()
                 << "\", \"mid\" : \""
@@ -640,7 +694,7 @@ WebRTCClient::OnFileOffer(
     });
 
     // 3. Set up local description callback (sends the generated offer)
-    m_pc->onLocalDescription([this, from](rtc::Description description) {
+    peerConnection->onLocalDescription([this, from, room](rtc::Description description) {
         std::string b64desc;
         if (!base64Encode(std::string(description), b64desc)) {
             Logger::error() << "Encountered error base64 encoding description payload.";
@@ -653,6 +707,8 @@ WebRTCClient::OnFileOffer(
                 << std::string(description.typeString())
                 << "\", \"peer\" : \""
                 << from
+                << "\", \"room\" : \""
+                << room
                 << "\", \"sdp\" : \""
                 << b64desc
                 << "\"}";
@@ -669,8 +725,8 @@ WebRTCClient::OnFileOffer(
         std::string sdp;
         if (base64Decode(doc["descriptions"][0].GetString(), sdp)) {
             Logger::info() << "Adding Remote Description: " << sdp;
-            m_pc->setRemoteDescription(rtc::Description(sdp, "offer"));
-            m_pc->createAnswer();
+            peerConnection->setRemoteDescription(rtc::Description(sdp, "offer"));
+            peerConnection->createAnswer();
         } else {
             Logger::error() << "Invalid SDP.";
         }
@@ -683,7 +739,7 @@ WebRTCClient::OnFileOffer(
         for (rapidjson::SizeType i = 0; i < doc["candidates"].Size(); i++) {
             if (base64Decode(doc["candidates"][i].GetString(), candidate)) {
                 Logger::info() << "Adding Remote Candidate: " << candidate;
-                m_pc->addRemoteCandidate(rtc::Candidate(candidate, "0"));
+                peerConnection->addRemoteCandidate(rtc::Candidate(candidate, "0"));
             } else {
                 Logger::error() << "Invalid Candidate.";
             }
@@ -891,6 +947,7 @@ WebRTCClient::StartClient() {
     while (m_clientState != ClientState::CLIENT_EXIT) {
         if (m_clientState == ClientState::CLIENT_INIT) {
 
+#if 0
             // STEP 1:  If a room is set, "join" Room
             if (Properties().Contains("room")) {
                 m_room = Properties().Get<std::string>("room");
@@ -958,7 +1015,7 @@ WebRTCClient::StartClient() {
             }
             continue;
         }
-#if 0
+#endif
             lock.unlock();
             std::string room;
             std::string peer;
@@ -1073,7 +1130,6 @@ WebRTCClient::StartClient() {
                    m_clientState == ClientState::CLIENT_WAIT_FOR_PONG ||
                    m_clientState == ClientState::CLIENT_EXIT;
         });
-#endif
     }
 }
 

@@ -2,8 +2,12 @@
 #define WEBRTC_CLIENT_HPP
 
 #include "WebRTC.hpp"
+#include "LocalDescription.hpp"
+#include "Queue.hpp"
 #include <condition_variable>
+#include <map>
 #include <mutex>
+#include <utility>
 #include <thread>
 
 /**
@@ -159,6 +163,11 @@ private:
      */
     void StartClient();
 
+    std::shared_ptr<rtc::PeerConnection> FindPeerConnection(
+        const std::string& peer,
+        const std::string& room
+    ) const;
+
     /**
      * @brief Synchronizes state transitions in the client lifecycle.
      */
@@ -199,8 +208,9 @@ private:
      */
     std::string m_file;
 
-    std::shared_ptr<rtc::DataChannel> m_dc;
-    std::shared_ptr<rtc::PeerConnection> m_pc;
+    using PeerRoomKey = std::pair<std::string, std::string>;
+    mutable std::mutex m_dataChannelsMutex;
+    std::map<PeerRoomKey, DataChannel> m_dataChannels;
 };
 
 #endif // WEBRTC_CLIENT_HPP

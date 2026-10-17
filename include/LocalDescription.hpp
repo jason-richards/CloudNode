@@ -1,6 +1,8 @@
 #pragma once
 #include "rtc/rtc.hpp"
 
+#include "Queue.hpp"
+
 #include <memory>
 #include <string>
 #include <iostream>
@@ -30,6 +32,16 @@ LocalDescription{
 } LocalDescription;
 
 using LocalDescriptionPtr = std::shared_ptr<LocalDescription>;
+
+struct DataChannel {
+    std::shared_ptr<rtc::PeerConnection> pc;
+    std::shared_ptr<rtc::DataChannel> channel;
+    QueuePtr<std::string> fileQ;
+
+    explicit operator bool() const {
+        return pc && channel && fileQ;
+    }
+};
 
 
 inline std::ostream&
@@ -106,8 +118,7 @@ base64Decode(
  * PeerConnection. The purpose is to collect all possible candidate addresses that can be used for establishing a 
  * connection between peers in a WebRTC session.
  *
- * @param pc A shared pointer to an rtc::PeerConnection object, representing the RTCPeerConnection instance.
- * @param channel Output handle for the data channel created to trigger the initial offer.
+ * @param dataChannel The peer connection and output handles for the created data channel and file queue.
  * @param desc A reference to a LocalDescription object, which will hold the gathered description after this
  * function completes.
  * @param time_out The maximum number of seconds to wait before timing out the operation. Defaults to 10 seconds if
@@ -119,8 +130,7 @@ base64Decode(
  */
 bool
 obtainInitialDescription(
-    std::shared_ptr<rtc::PeerConnection> pc,
-    std::shared_ptr<rtc::DataChannel>& channel,
+    DataChannel& dataChannel,
     LocalDescription &desc,
     int time_out = 10
 );
