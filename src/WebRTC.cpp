@@ -140,7 +140,6 @@ WebRTC::Join(
         << room
         << "\".";
 
-
     return true;
 }
 

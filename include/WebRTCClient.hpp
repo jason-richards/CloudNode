@@ -99,6 +99,12 @@ public:
     );
 
 
+    bool
+    MakeDataChannel(
+        const std::string& peer,
+        const std::string& room
+    );
+
 protected:
 
     /**

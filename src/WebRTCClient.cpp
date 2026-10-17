@@ -45,6 +45,7 @@ WebRTCClient::JoinRoom(
     const std::string& room
 ) {
     rapidjson::Document doc;
+
     doc.SetObject();
     auto& allocator = doc.GetAllocator();
     doc.AddMember("type", rapidjson::Value("join", allocator), allocator);
@@ -63,6 +64,53 @@ WebRTCClient::JoinRoom(
         << "Requested to join room \'"
         << room
         << "\'.";
+
+    return true;
+}
+
+
+bool
+WebRTCClient::MakeDataChannel(
+    const std::string& peer,
+    const std::string& room
+) {
+    Logger::info()
+        << "MakeDataChannel peer=\'"
+        << peer;
+
+    rtc::Configuration config;
+    const auto maxMessageSize = static_cast<size_t>(Properties().Get<int>("maxMessageSize"));
+    config.maxMessageSize = maxMessageSize;
+
+    std::string stunServer;
+
+    auto stunAddress = Properties().Get<std::string>("stunAddress");
+    auto stunPort    = Properties().Get<int>("stunPort");
+    if (stunAddress.substr(0, 5).compare("stun:") != 0) {
+        stunServer = "stun:";
+    }
+
+    stunServer += stunAddress + ":" + std::to_string(stunPort);
+    config.iceServers.emplace_back(stunServer);
+
+    Logger::info() << stunServer;
+    m_pc = std::make_shared<rtc::PeerConnection>(config);
+    LocalDescription desc;
+
+    if (!obtainInitialDescription(m_pc, m_dc, desc)) {
+        Logger::warn() << "Failed to get initial description.";
+        return false;
+    }
+
+    m_dc->onOpen([maxMessageSize, weakChannel = rtc::weak_ptr(m_dc)]() {
+        Logger::info() << "Offering DataChannel open!";
+    });
+
+    m_dc->onMessage([](std::variant<rtc::binary, std::string> message) {
+        if (std::holds_alternative<std::string>(message)) {
+            Logger::info() << "Received: " << std::get<std::string>(message);
+        }
+    });
 
     return true;
 }
@@ -275,6 +323,12 @@ void
 WebRTCClient::OnJoin(
     rapidjson::Document& doc
 ) {
+    rapidjson::StringBuffer buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    doc.Accept(writer);
+
+    Logger::info() << "OnJoin: " << buffer.GetString();
+
     if (!doc.HasMember("room") || !doc["room"].IsString()) {
         Logger::warn() << "Join command with no room specification.";
         return;
@@ -289,18 +343,14 @@ WebRTCClient::OnJoin(
     std::string peer = doc["peerId"].GetString();
     const std::string clientName = Properties().Get<std::string>("name");
 
-    Join(peer, room);
-
-    bool joined = false;
-    {
-        std::lock_guard<std::mutex> lock(m_clientStateMutex);
-        if (m_clientState == ClientState::CLIENT_WAITING_FOR_JOIN &&
-            room == m_room && peer == clientName) {
-            m_clientState = ClientState::CLIENT_JOINED;
-            joined = true;
-        }
+    if (!Join(peer, room)) {
+        return;
     }
-    if (joined) {
+
+    std::lock_guard<std::mutex> lock(m_clientStateMutex);
+    if (m_clientState == ClientState::CLIENT_WAITING_FOR_JOIN &&
+        room == m_room && peer == clientName) {
+        m_clientState = ClientState::CLIENT_JOINED;
         m_clientStateChanged.notify_all();
     }
 }
@@ -432,6 +482,7 @@ WebRTCClient::OnAnswer(
     }
 
     m_pc->setRemoteDescription(rtc::Description(description, "answer"));
+
     Logger::info() << "Successfully set SDP.";
 }
 
@@ -809,7 +860,6 @@ WebRTCClient::IsRunning() {
 }
 
 
-
 /**
  * @brief Runs the client lifecycle and keepalive state machine.
  *
@@ -834,10 +884,81 @@ WebRTCClient::IsRunning() {
  */
 void
 WebRTCClient::StartClient() {
-    std::chrono::seconds timeout{5};
+    std::chrono::seconds timeout{Properties().Get<int>("timeout")};
+
     std::unique_lock<std::mutex> lock(m_clientStateMutex);
+
     while (m_clientState != ClientState::CLIENT_EXIT) {
         if (m_clientState == ClientState::CLIENT_INIT) {
+
+            // STEP 1:  If a room is set, "join" Room
+            if (Properties().Contains("room")) {
+                m_room = Properties().Get<std::string>("room");
+                m_clientState = ClientState::CLIENT_WAITING_FOR_JOIN;
+                if (!JoinRoom(m_room)) {
+                    Logger::error()
+                        << "Failed to join \'"
+                        << m_room 
+                        << "\'";
+                    m_clientState = ClientState::CLIENT_EXIT;
+                    continue;
+                }
+                if (!m_clientStateChanged.wait_for(lock, timeout, 
+                    [this]() {
+                        return m_clientState == ClientState::CLIENT_JOINED;
+                    })
+                ) {
+                    Logger::warn() << "Timed out waiting for \"join\" to complete.";
+                    m_clientState = ClientState::CLIENT_EXIT;
+                    continue;
+                };
+            }
+
+            // STEP 2: If a peer is set, establish a datachannel
+            if (Properties().Contains("peer")) {
+                m_peer = Properties().Get<std::string>("peer");
+            }
+
+
+            m_clientState = ClientState::CLIENT_RUN;
+            continue;
+        }
+
+        if (m_clientState == ClientState::CLIENT_RUN) {
+            const bool interrupted = m_clientStateChanged.wait_for(
+                lock,
+                timeout,
+                [this]() { return m_clientState != ClientState::CLIENT_RUN; }
+            );
+            if (!interrupted && m_clientState == ClientState::CLIENT_RUN) {
+                m_clientState = ClientState::CLIENT_PING;
+            }
+            continue;
+        }
+        if (m_clientState == ClientState::CLIENT_PING) {
+            m_clientState = ClientState::CLIENT_WAIT_FOR_PONG;
+            lock.unlock();
+            const bool sent = SendPing();
+            lock.lock();
+            if (!sent && m_clientState == ClientState::CLIENT_WAIT_FOR_PONG) {
+                m_clientState = ClientState::CLIENT_EXIT;
+            }
+            continue;
+        }
+
+        if (m_clientState == ClientState::CLIENT_WAIT_FOR_PONG) {
+            const bool interrupted = m_clientStateChanged.wait_for(
+                lock,
+                timeout,
+                [this]() { return m_clientState != ClientState::CLIENT_WAIT_FOR_PONG; }
+            );
+            if (!interrupted && m_clientState == ClientState::CLIENT_WAIT_FOR_PONG) {
+                Logger::warn() << "Timed out waiting for pong.";
+                m_clientState = ClientState::CLIENT_EXIT;
+            }
+            continue;
+        }
+#if 0
             lock.unlock();
             std::string room;
             std::string peer;
@@ -952,6 +1073,7 @@ WebRTCClient::StartClient() {
                    m_clientState == ClientState::CLIENT_WAIT_FOR_PONG ||
                    m_clientState == ClientState::CLIENT_EXIT;
         });
+#endif
     }
 }
 

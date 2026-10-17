@@ -241,7 +241,13 @@ protected:
      * @param message Serialized message payload.
      * @return true when the send succeeds.
      */
-    bool SendMessage(const std::string& message) { return m_messagePort->Send(message); }
+    bool SendMessage(const std::string& message) {
+        if (!m_messagePort || !m_messagePort->WaitUntilRunning()) {
+            Logger::warn() << "Cannot send message because the message port did not become active.";
+            return false;
+        }
+        return m_messagePort->Send(message);
+    }
 
     /**
      * @brief Returns the currently active websocket for the message transport.
