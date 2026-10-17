@@ -37,6 +37,7 @@ struct DataChannel {
     std::shared_ptr<rtc::PeerConnection> pc;
     std::shared_ptr<rtc::DataChannel> channel;
     QueuePtr<std::string> fileQ;
+    LocalDescription description;
 
     explicit operator bool() const {
         return pc && channel && fileQ;
