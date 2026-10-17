@@ -105,6 +105,23 @@ public:
 
 
     /**
+     * @brief Signal file transfer complete.
+     *
+     * This method is called when the file has been completely chunked and send over
+     * the data channel.
+     *
+     * @param room Room that contains the sender and recipient.
+     * @param peer Identifier of the intended file recipient.
+     * @param fileDetails Path to the file that will be transferred.
+     */
+    void
+    SendFileComplete(
+        const std::string& room,
+        const std::string& peer
+    );
+
+
+    /**
      * @brief Creates an outgoing data channel and initiates peer negotiation.
      *
      * Configures the peer connection, gathers its initial SDP description and
