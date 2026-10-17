@@ -86,40 +86,112 @@ WebRTCClient::MakeDataChannel(
 ) {
     Logger::info()
         << "MakeDataChannel peer=\'"
-        << peer;
+        << peer
+        << "\', room=\'"
+        << room
+        << "\'.";
 
     rtc::Configuration config;
     const auto maxMessageSize = static_cast<size_t>(Properties().Get<int>("maxMessageSize"));
     config.maxMessageSize = maxMessageSize;
 
-    std::string stunServer;
-
     auto stunAddress = Properties().Get<std::string>("stunAddress");
-    auto stunPort    = Properties().Get<int>("stunPort");
+    auto stunPort = Properties().Get<int>("stunPort");
+    std::string stunServer;
     if (stunAddress.substr(0, 5).compare("stun:") != 0) {
         stunServer = "stun:";
     }
-
     stunServer += stunAddress + ":" + std::to_string(stunPort);
     config.iceServers.emplace_back(stunServer);
-
     Logger::info() << stunServer;
+
     DataChannel dataChannel;
     dataChannel.pc = std::make_shared<rtc::PeerConnection>(config);
-    LocalDescription desc;
-
-    if (!obtainInitialDescription(dataChannel, desc)) {
+    if (!obtainInitialDescription(dataChannel, dataChannel.description)) {
         Logger::warn() << "Failed to get initial description.";
         return false;
     }
-    auto channel = dataChannel.channel;
-    {
-        std::lock_guard<std::mutex> lock(m_dataChannelsMutex);
-        m_dataChannels.insert_or_assign({peer, room}, std::move(dataChannel));
-    }
 
-    channel->onOpen([maxMessageSize, weakChannel = rtc::weak_ptr(channel)]() {
+    auto channel = dataChannel.channel;
+    auto fileQ = dataChannel.fileQ;
+    channel->onOpen([fileQ, maxMessageSize, weakChannel = rtc::weak_ptr(channel)]() {
         Logger::info() << "Offering DataChannel open!";
+
+        auto channel = weakChannel.lock();
+        if (!channel) {
+            Logger::error() << "File data channel is no longer available.";
+            return;
+        }
+
+        struct TransferState {
+            std::mutex mutex;
+            std::condition_variable changed;
+            bool closed{false};
+        };
+
+        auto transfer = std::make_shared<TransferState>();
+
+        channel->setBufferedAmountLowThreshold(maxMessageSize / 2);
+        channel->onBufferedAmountLow([transfer]() {
+            transfer->changed.notify_one();
+        });
+
+        channel->onClosed([transfer]() {
+            std::lock_guard<std::mutex> lock(transfer->mutex);
+            transfer->closed = true;
+            transfer->changed.notify_one();
+        });
+
+        std::thread([fileQ, channel, transfer, maxMessageSize]() {
+            auto queuedFilePath = GetItem(fileQ);
+            if (!queuedFilePath || queuedFilePath->empty()) {
+                Logger::error() << "No file path available in the data channel queue.";
+                return;
+            }
+
+            const auto& filePath = *queuedFilePath;
+            std::ifstream file(filePath, std::ios::binary);
+            if (!file) {
+                Logger::error() << "Unable to open file for transfer: " << filePath;
+                return;
+            }
+
+            auto waitForCapacity = [&]() {
+                std::unique_lock<std::mutex> lock(transfer->mutex);
+                transfer->changed.wait(lock, [&]() {
+                    return transfer->closed || !channel->isOpen() ||
+                           channel->bufferedAmount() <= (maxMessageSize / 2);
+                });
+
+                return !transfer->closed && channel->isOpen();
+            };
+
+            rtc::binary chunk(maxMessageSize);
+            while (file.read(reinterpret_cast<char*>(chunk.data()), chunk.size()) || file.gcount() > 0) {
+                auto bytesRead = file.gcount();
+                while (channel->bufferedAmount() > maxMessageSize) {
+                    if (!waitForCapacity()) {
+                        Logger::warn() << "Data channel closed before file transfer completed.";
+                        return;
+                    }
+                }
+
+                Logger::info() << "Sending " << bytesRead;
+                if (!channel->send(chunk.data(), bytesRead)) {
+                    if (!waitForCapacity()) {
+                        Logger::warn() << "Data channel closed before file transfer completed.";
+                        return;
+                    }
+                    continue;
+                }
+            }
+
+            if (file.bad()) {
+                Logger::error() << "Error reading file during transfer: " << filePath;
+                return;
+            }
+            Logger::info() << "File data sent: " << filePath;
+        }).detach();
     });
 
     channel->onMessage([](std::variant<rtc::binary, std::string> message) {
@@ -127,6 +199,11 @@ WebRTCClient::MakeDataChannel(
             Logger::info() << "Received: " << std::get<std::string>(message);
         }
     });
+
+    {
+        std::lock_guard<std::mutex> lock(m_dataChannelsMutex);
+        m_dataChannels.insert_or_assign({peer, room}, std::move(dataChannel));
+    }
 
     return true;
 }
@@ -136,12 +213,10 @@ WebRTCClient::MakeDataChannel(
 /**
  * @brief Builds a file-transfer offer and sends it over the signalling channel.
  *
- * The function creates a fresh peer connection, configures the STUN server, and
- * gathers the initial SDP and ICE candidates required to establish the data
- * channel. Once the local description is ready, it serializes a JSON `file_offer`
- * payload with the room, target peer, file metadata, description, and candidate
- * information and sends it to the message relay. After the channel opens, the
- * sender streams the actual file bytes over the data channel in bounded chunks.
+ * The function queues the file path for the existing data channel, then sends
+ * a JSON `file_offer` payload with the room, target peer, file metadata, and
+ * the previously gathered SDP and ICE candidates to the message relay. After
+ * the channel opens, the sender streams the file bytes in bounded chunks.
  *
  * @param room Room containing the sender and recipient.
  * @param peer Identifier of the intended peer receiving the offer.
@@ -172,123 +247,17 @@ WebRTCClient::SendFileOffer(
         return;
     }
 
-    rtc::Configuration config;
-    const auto maxMessageSize = static_cast<size_t>(Properties().Get<int>("maxMessageSize"));
-    config.maxMessageSize = maxMessageSize;
-
-    std::string stunServer;
-
-    auto stunAddress = Properties().Get<std::string>("stunAddress");
-    auto stunPort    = Properties().Get<int>("stunPort");
-    if (stunAddress.substr(0, 5).compare("stun:") != 0) {
-        stunServer = "stun:";
-    }
-
-    stunServer += stunAddress + ":" + std::to_string(stunPort);
-    config.iceServers.emplace_back(stunServer);
-
-    Logger::info() << stunServer;
     DataChannel dataChannel;
-    dataChannel.pc = std::make_shared<rtc::PeerConnection>(config);
-    LocalDescription desc;
-
-    if (!obtainInitialDescription(dataChannel, desc)) {
-        Logger::warn() << "Failed to get initial description.";
-        return;
-    }
-    auto channel = dataChannel.channel;
     {
         std::lock_guard<std::mutex> lock(m_dataChannelsMutex);
-        m_dataChannels.insert_or_assign({peer, room}, std::move(dataChannel));
-    }
-
-    channel->onOpen([fileDetails, maxMessageSize, weakChannel = rtc::weak_ptr(channel)]() {
-        Logger::info() << "Offering DataChannel open!";
-
-        auto channel = weakChannel.lock();
-        if (!channel) {
-            Logger::error() << "File data channel is no longer available.";
+        auto it = m_dataChannels.find({peer, room});
+        if (it == m_dataChannels.end() || !it->second) {
+            Logger::error() << "No data channel is available for peer '" << peer << "' in room '" << room << "'.";
             return;
         }
-
-        struct TransferState {
-            std::mutex mutex;
-            std::condition_variable changed;
-            bool closed{false};
-        };
-
-        auto transfer = std::make_shared<TransferState>();
-
-        channel->setBufferedAmountLowThreshold(maxMessageSize/2);
-        channel->onBufferedAmountLow([transfer]() {
-            transfer->changed.notify_one();
-        });
-
-        channel->onClosed([transfer]() {
-            std::lock_guard<std::mutex> lock(transfer->mutex);
-            transfer->closed = true;
-            transfer->changed.notify_one();
-        });
-
-        std::thread([fileDetails, channel, transfer, maxMessageSize]() {
-            std::ifstream file(fileDetails, std::ios::binary);
-            if (!file) {
-                Logger::error() << "Unable to open file for transfer: " << fileDetails;
-                return;
-            }
-
-            auto waitForCapacity = [&]() {
-                std::unique_lock<std::mutex> lock(transfer->mutex);
-                transfer->changed.wait(lock,
-                    [&]() {
-                        return transfer->closed || !channel->isOpen() ||
-                           channel->bufferedAmount() <= (maxMessageSize / 2);
-                    }
-                );
-
-                return !transfer->closed && channel->isOpen();
-            };
-
-            rtc::binary chunk(maxMessageSize);
-
-            while (file.read(reinterpret_cast<char*>(chunk.data()), chunk.size()) || file.gcount() > 0) {
-                auto bytesRead = file.gcount();
-
-                while (channel->bufferedAmount() > maxMessageSize) {
-                    if (!waitForCapacity()) {
-                        Logger::warn() << "Data channel closed before file transfer completed.";
-                        return;
-                    }
-                }
-
-                Logger::info()
-                    << "Sending "
-                    << bytesRead;
-
-                if (!channel->send(chunk.data(), bytesRead)) {
-                    if (!waitForCapacity()) {
-                        Logger::warn() << "Data channel closed before file transfer completed.";
-                        return;
-                    }
-                    continue;
-                }
-            }
-
-            if (file.bad()) {
-                Logger::error() << "Error reading file during transfer: " << fileDetails;
-                return;
-            }
-
-            Logger::info() << "File data sent: " << fileDetails;
-        }).detach();
-    });
-
-    channel->onMessage([](std::variant<rtc::binary, std::string> message) {
-        if (std::holds_alternative<std::string>(message)) {
-            Logger::info() << "Received: " << std::get<std::string>(message);
-        }
-    });
-
+        dataChannel = it->second;
+    }
+    AddItem(dataChannel.fileQ, std::make_shared<std::string>(fileDetails));
 
     std::string payload = "";
     payload += "{\"type\" : \"file_offer\", ";
@@ -296,9 +265,9 @@ WebRTCClient::SendFileOffer(
     payload += " \"peer\" : \"" + peer + "\", ";
     payload += " \"file\" : "   + fdsc + ", ";  
 
-    payload += desc.GetDescriptionsJson();
+    payload += dataChannel.description.GetDescriptionsJson();
     payload += ", ";
-    payload += desc.GetCandidatesJson();
+    payload += dataChannel.description.GetCandidatesJson();
     payload += "}";
 
     Logger::info() << payload;
@@ -1059,6 +1028,16 @@ WebRTCClient::StartClient() {
                 Logger::warn() << "No 'room' to join specified.";
                 m_clientState = ClientState::CLIENT_RUN;
                 continue;
+            }
+
+            if (!m_peer.empty()) {
+                lock.unlock();
+                const bool channelCreated = MakeDataChannel(m_peer, m_room);
+                lock.lock();
+                if (!channelCreated && m_clientState != ClientState::CLIENT_EXIT) {
+                    m_clientState = ClientState::CLIENT_EXIT;
+                    continue;
+                }
             }
 
             m_clientState = ClientState::CLIENT_WAITING_FOR_JOIN;

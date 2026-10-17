@@ -153,3 +153,12 @@ void NotifyAll(
   q->NotifyAll();                                                      
 }
 
+template void AddItem<std::string>(
+  QueuePtr<std::string> queue,
+  std::shared_ptr<std::string> item
+);
+
+template std::shared_ptr<std::string> GetItem<std::string>(
+  QueuePtr<std::string> queue
+);
+
