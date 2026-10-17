@@ -63,6 +63,7 @@ bool MessagePortServer::Start(const std::string& address, int port) {
         // Server is already running
         return false;
     }
+    m_stopRequested = false;
 
     m_serverThread = std::thread([this, port]() {
         uWS::App()
@@ -110,13 +111,16 @@ bool MessagePortServer::Start(const std::string& address, int port) {
                         std::lock_guard<std::mutex> lock(m_mtx);
                         m_isRunning = true;
                     }
+                    m_runningChanged.notify_all();
                 } else {
                     // Error handling if listening fails
                     std::cerr << "MessagePort failed to listen on port " << port << std::endl;
                     {
                         std::lock_guard<std::mutex> lock(m_mtx);
                         m_isRunning = false;
+                        m_stopRequested = true;
                     }
+                    m_runningChanged.notify_all();
                 }
             })
             .run(); // Start the uWS event loop
@@ -149,15 +153,18 @@ bool MessagePortServer::Send(const std::string& message) {
 void MessagePortServer::Stop() {
     uWS::Loop* loop = nullptr;
     us_listen_socket_t* listenSocket = nullptr;
+    bool alreadyStopped = false;
     {
         std::lock_guard<std::mutex> lock(m_mtx);
-        if (!m_isRunning && !m_serverThread.joinable()) {
-            return; // Already stopped or never started
-        }
-
+        alreadyStopped = !m_isRunning && !m_serverThread.joinable();
         m_isRunning = false;
+        m_stopRequested = true;
         loop = m_loop;
         listenSocket = m_listenSocket;
+    }
+    m_runningChanged.notify_all();
+    if (alreadyStopped) {
+        return;
     }
 
     // Defer the socket closing operation to the uWS loop thread

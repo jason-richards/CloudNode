@@ -3,6 +3,7 @@
 
 #include <App.h>
 #include <atomic>
+#include <condition_variable>
 #include <string>
 #include <functional>
 #include <memory>
@@ -130,6 +131,18 @@ public:
      */
     virtual bool IsRunning() = 0;
 
+    /**
+     * @brief Waits until the transport is running or has been stopped.
+     * @return true if the transport became active, false if it was stopped first.
+     */
+    bool WaitUntilRunning() {
+        std::unique_lock<std::mutex> lock(m_mtx);
+        m_runningChanged.wait(lock, [this]() {
+            return m_isRunning || m_stopRequested;
+        });
+        return m_isRunning;
+    }
+
 protected:
     /**
      * @brief Constructs a named transport instance.
@@ -166,6 +179,12 @@ protected:
      * @brief Synchronizes access to shared transport state.
      */
     std::mutex m_mtx;
+
+    /** @brief Notifies waiters when transport readiness changes. */
+    std::condition_variable m_runningChanged;
+
+    /** @brief Indicates shutdown so readiness waiters cannot block forever. */
+    bool m_stopRequested{false};
 
     /**
      * @brief Human-readable identifier for the transport instance.

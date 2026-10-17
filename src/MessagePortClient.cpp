@@ -31,6 +31,7 @@ bool MessagePortClient::Start(const std::string& address, int port) {
     if (m_isRunning) {
         return false;
     }
+    m_stopRequested = false;
 
     m_socket = std::make_unique<ix::WebSocket>();
     m_socket->setUrl(address + ":" + std::to_string(port));
@@ -50,8 +51,9 @@ bool MessagePortClient::Start(const std::string& address, int port) {
             Logger::info() << "ix::WebSocketMessageType::Open";
             {
                 std::lock_guard<std::mutex> lock(m_mtx);
-                m_isRunning = true;
+                m_isRunning = !m_stopRequested;
             }
+            m_runningChanged.notify_all();
             if (m_openCallback) {
                 m_openCallback(nullptr, m_name);
             }
@@ -67,6 +69,7 @@ bool MessagePortClient::Start(const std::string& address, int port) {
                 std::lock_guard<std::mutex> lock(m_mtx);
                 m_isRunning = false;
             }
+            m_runningChanged.notify_all();
             if (m_closeCallback) {
                 m_closeCallback(nullptr, msg->closeInfo.code, msg->closeInfo.reason);
             }
@@ -77,6 +80,7 @@ bool MessagePortClient::Start(const std::string& address, int port) {
                 std::lock_guard<std::mutex> lock(m_mtx);
                 m_isRunning = false;
             }
+            m_runningChanged.notify_all();
             break;
         };
     });
@@ -90,7 +94,8 @@ bool MessagePortClient::Start(const std::string& address, int port) {
 
 /** Sends a text message through the active WebSocket connection. */
 bool MessagePortClient::Send(const std::string& message) {
-    if (!m_socket) {
+    std::lock_guard<std::mutex> lock(m_mtx);
+    if (!m_socket || !m_isRunning) {
         return false;
     }
 
@@ -102,7 +107,9 @@ void MessagePortClient::Stop() {
     {
         std::lock_guard<std::mutex> lock(m_mtx);
         m_isRunning = false;
+        m_stopRequested = true;
     }
+    m_runningChanged.notify_all();
 
     if (m_socket) {
         m_socket->stop();

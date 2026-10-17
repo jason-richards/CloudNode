@@ -368,5 +368,7 @@ obtainInitialDescription(
     }
 
     desc = gathered->description;
+
     return !desc.descriptions.empty();
 }
+
