@@ -1,7 +1,6 @@
 #include "WebRTCClient.hpp"
 #include "LocalDescription.hpp"
 #include "MimeDetector.hpp"
-
 #include "Logger.hpp"
 
 #include "rapidjson/stringbuffer.h"
@@ -37,55 +36,13 @@ WebRTCClient::FindPeerConnection(
  * transport callbacks wake it through the associated condition variable.
  */
 
-
-
-/**
- * @brief Sends a room-join request to the message server.
- *
- * The request is encoded as a JSON object with the following shape:
- * @code
- * { "type": "join", "room": "<room-id>" }
- * @endcode
- *
- * @param room Identifier of the room to join.
- * @return true if the serialized join request was sent successfully.
- */
-bool
-WebRTCClient::JoinRoom(
-    const std::string& room
-) {
-    rapidjson::Document doc;
-
-    doc.SetObject();
-    auto& allocator = doc.GetAllocator();
-    doc.AddMember("type", rapidjson::Value("join", allocator), allocator);
-    doc.AddMember("room", rapidjson::Value(room.c_str(), allocator), allocator);
-
-    rapidjson::StringBuffer buffer;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-    doc.Accept(writer);
-
-    if (!SendMessage(buffer.GetString())) {
-        Logger::error() << "Unable to send join request for room '" << room << "'.";
-        return false;
-    }
-
-    Logger::info()
-        << "Requested to join room \'"
-        << room
-        << "\'.";
-
-    return true;
-}
-
-
-bool
-WebRTCClient::MakeDataChannel(
+std::shared_ptr<rtc::PeerConnection>
+WebRTCClient::MakePeerConnection(
     const std::string& peer,
     const std::string& room
 ) {
     Logger::info()
-        << "MakeDataChannel peer=\'"
+        << "MakePeerConnection peer=\'"
         << peer
         << "\', room=\'"
         << room
@@ -105,8 +62,17 @@ WebRTCClient::MakeDataChannel(
     config.iceServers.emplace_back(stunServer);
     Logger::info() << stunServer;
 
+    return std::make_shared<rtc::PeerConnection>(config);
+}
+
+bool
+WebRTCClient::MakeDataChannel(
+    const std::string& peer,
+    const std::string& room
+) {
+    const auto maxMessageSize = static_cast<size_t>(Properties().Get<int>("maxMessageSize"));
     DataChannel dataChannel;
-    dataChannel.pc = std::make_shared<rtc::PeerConnection>(config);
+    dataChannel.pc = MakePeerConnection(peer, room);
     if (!obtainInitialDescription(dataChannel, dataChannel.description)) {
         Logger::warn() << "Failed to get initial description.";
         return false;
@@ -114,7 +80,7 @@ WebRTCClient::MakeDataChannel(
 
     auto channel = dataChannel.channel;
     auto fileQ = dataChannel.fileQ;
-    channel->onOpen([fileQ, maxMessageSize, weakChannel = rtc::weak_ptr(channel)]() {
+    channel->onOpen([this, fileQ, maxMessageSize, peer, room, weakChannel = rtc::weak_ptr(channel)]() {
         Logger::info() << "Offering DataChannel open!";
 
         auto channel = weakChannel.lock();
@@ -142,20 +108,7 @@ WebRTCClient::MakeDataChannel(
             transfer->changed.notify_one();
         });
 
-        std::thread([fileQ, channel, transfer, maxMessageSize]() {
-            auto queuedFilePath = GetItem(fileQ);
-            if (!queuedFilePath || queuedFilePath->empty()) {
-                Logger::error() << "No file path available in the data channel queue.";
-                return;
-            }
-
-            const auto& filePath = *queuedFilePath;
-            std::ifstream file(filePath, std::ios::binary);
-            if (!file) {
-                Logger::error() << "Unable to open file for transfer: " << filePath;
-                return;
-            }
-
+        std::thread([this, fileQ, channel, transfer, maxMessageSize, peer, room]() {
             auto waitForCapacity = [&]() {
                 std::unique_lock<std::mutex> lock(transfer->mutex);
                 transfer->changed.wait(lock, [&]() {
@@ -166,31 +119,61 @@ WebRTCClient::MakeDataChannel(
                 return !transfer->closed && channel->isOpen();
             };
 
-            rtc::binary chunk(maxMessageSize);
-            while (file.read(reinterpret_cast<char*>(chunk.data()), chunk.size()) || file.gcount() > 0) {
-                auto bytesRead = file.gcount();
-                while (channel->bufferedAmount() > maxMessageSize) {
-                    if (!waitForCapacity()) {
-                        Logger::warn() << "Data channel closed before file transfer completed.";
-                        return;
-                    }
+            while (channel->isOpen()) {
+                auto queuedFilePath = GetItem(fileQ);
+                if (!channel->isOpen()) {
+                    return;
                 }
-
-                Logger::info() << "Sending " << bytesRead;
-                if (!channel->send(chunk.data(), bytesRead)) {
-                    if (!waitForCapacity()) {
-                        Logger::warn() << "Data channel closed before file transfer completed.";
-                        return;
-                    }
+                if (!queuedFilePath || queuedFilePath->empty()) {
+                    Logger::error() << "No file path available in the data channel queue.";
                     continue;
                 }
-            }
 
-            if (file.bad()) {
-                Logger::error() << "Error reading file during transfer: " << filePath;
-                return;
+                const auto& filePath = *queuedFilePath;
+                std::ifstream file(filePath, std::ios::binary);
+                if (!file) {
+                    Logger::error() << "Unable to open file for transfer: " << filePath;
+                    continue;
+                }
+
+                bool transferSucceeded = true;
+                rtc::binary chunk(maxMessageSize);
+                while (file.read(reinterpret_cast<char*>(chunk.data()), chunk.size()) || file.gcount() > 0) {
+                    auto bytesRead = file.gcount();
+                    while (channel->bufferedAmount() > maxMessageSize) {
+                        if (!waitForCapacity()) {
+                            Logger::warn() << "Data channel closed before file transfer completed.";
+                            return;
+                        }
+                    }
+
+                    Logger::info()
+                        << "Sending "
+                        << bytesRead;
+
+                    if (!channel->send(chunk.data(), bytesRead)) {
+                        if (!waitForCapacity()) {
+                            Logger::warn() << "Data channel closed before file transfer completed.";
+                            return;
+                        }
+                    }
+                }
+
+                if (file.bad()) {
+                    Logger::error() << "Error reading file during transfer: " << filePath;
+                    transferSucceeded = false;
+                }
+
+                if (transferSucceeded && channel->isOpen()) {
+                    Logger::info() << "File data sent: " << filePath;
+                    const std::string completion =
+                        "{\"type\":\"file_complete\",\"room\":\"" + room +
+                        "\",\"peer\":\"" + peer + "\"}";
+                    if (!SendMessage(completion)) {
+                        Logger::error() << "Unable to send file completion for: " << filePath;
+                    }
+                }
             }
-            Logger::info() << "File data sent: " << filePath;
         }).detach();
     });
 
@@ -200,9 +183,28 @@ WebRTCClient::MakeDataChannel(
         }
     });
 
+    std::string payload = "{\"type\" : \"offer\", ";
+    payload += "\"room\" : \"" + room + "\", ";
+    payload += "\"peer\" : \"" + peer + "\", ";
+    payload += dataChannel.description.GetDescriptionsJson();
+    payload += ", ";
+    payload += dataChannel.description.GetCandidatesJson();
+    payload += "}";
+
+    auto peerConnection = dataChannel.pc;
     {
         std::lock_guard<std::mutex> lock(m_dataChannelsMutex);
         m_dataChannels.insert_or_assign({peer, room}, std::move(dataChannel));
+    }
+
+    if (!SendMessage(payload)) {
+        Logger::error() << "Unable to send offer for peer '" << peer << "' in room '" << room << "'.";
+        std::lock_guard<std::mutex> lock(m_dataChannelsMutex);
+        auto it = m_dataChannels.find({peer, room});
+        if (it != m_dataChannels.end() && it->second.pc == peerConnection) {
+            m_dataChannels.erase(it);
+        }
+        return false;
     }
 
     return true;
@@ -210,23 +212,11 @@ WebRTCClient::MakeDataChannel(
 
 
 
-/**
- * @brief Builds a file-transfer offer and sends it over the signalling channel.
- *
- * The function queues the file path for the existing data channel, then sends
- * a JSON `file_offer` payload with the room, target peer, file metadata, and
- * the previously gathered SDP and ICE candidates to the message relay. After
- * the channel opens, the sender streams the file bytes in bounded chunks.
- *
- * @param room Room containing the sender and recipient.
- * @param peer Identifier of the intended peer receiving the offer.
- * @param fileDetails Path to the file that will be transferred.
- */
 void
 WebRTCClient::SendFileOffer(
-    const std::string&  room,
-    const std::string&  peer,
-    const std::string&  fileDetails
+    const std::string& room,
+    const std::string& peer,
+    const std::string& fileDetails
 ) {
     Logger::info()
         << "SendFileOffer peer=\'"
@@ -263,11 +253,7 @@ WebRTCClient::SendFileOffer(
     payload += "{\"type\" : \"file_offer\", ";
     payload += " \"room\" : \"" + room + "\", ";
     payload += " \"peer\" : \"" + peer + "\", ";
-    payload += " \"file\" : "   + fdsc + ", ";  
-
-    payload += dataChannel.description.GetDescriptionsJson();
-    payload += ", ";
-    payload += dataChannel.description.GetCandidatesJson();
+    payload += " \"file\" : "   + fdsc + " ";
     payload += "}";
 
     Logger::info() << payload;
@@ -279,17 +265,6 @@ WebRTCClient::SendFileOffer(
 }
 
 
-
-/**
- * @brief Sends a lightweight keepalive ping to the message server.
- *
- * The ping payload is intentionally minimal and is used to verify that the
- * connection remains alive. A successful send only confirms that the local
- * transport accepted the message; the worker waits separately for a matching
- * pong response.
- *
- * @return true if the ping was sent successfully.
- */
 bool
 WebRTCClient::SendPing() {
     if (!SendMessage("{ \"type\" : \"ping\" }")) {
@@ -301,15 +276,6 @@ WebRTCClient::SendPing() {
 
 
 
-/**
- * @brief Handles a server join event.
- *
- * Adds the announced peer to this client's local room membership. When the
- * event confirms this client has joined its configured room, changes the
- * worker state to `CLIENT_JOINED` and wakes the worker.
- *
- * @param doc JSON payload containing the room and peerId fields.
- */
 void
 WebRTCClient::OnJoin(
     rapidjson::Document& doc
@@ -348,15 +314,6 @@ WebRTCClient::OnJoin(
 
 
 
-/**
- * @brief Handles a server leave event.
- *
- * Removes the announced peer from this client's local room membership. The
- * event is ignored if either the room or peerId field is missing or has the
- * wrong JSON type.
- *
- * @param doc JSON payload containing the room and peerId fields.
- */
 void
 WebRTCClient::OnLeave(
     rapidjson::Document& doc
@@ -379,14 +336,6 @@ WebRTCClient::OnLeave(
 
 
 
-/**
- * @brief Handles a file-accept notification.
- *
- * This handler currently logs the notification only; the document is not yet
- * used to update a peer connection or continue a file transfer.
- *
- * @param doc JSON payload describing the accepted file transfer.
- */
 void
 WebRTCClient::OnFileAccept(
     rapidjson::Document& doc
@@ -444,16 +393,6 @@ WebRTCClient::OnFileAccept(
 
 
 
-/**
- * @brief Applies a remote SDP answer for an established peer connection.
- *
- * The signalling server forwards the remote side's SDP answer as a Base64-encoded
- * string. This handler decodes that payload, validates the presence of an active
- * peer connection, and sets the remote description so the data channel can finish
- * the WebRTC handshake.
- *
- * @param doc JSON payload containing the answer SDP.
- */
 void
 WebRTCClient::OnAnswer(
     rapidjson::Document& doc
@@ -490,16 +429,6 @@ WebRTCClient::OnAnswer(
 
 
 
-/**
- * @brief Adds a remote ICE candidate to the active peer connection.
- *
- * Trickled ICE candidates are sent over the signalling channel as Base64-encoded
- * strings and a media ID. The handler validates the fields, decodes the
- * candidate, and registers it with the current RTCPeerConnection so the WebRTC
- * negotiation can complete as ICE gathering continues.
- *
- * @param doc JSON payload containing the remote ICE candidate and MID.
- */
 void
 WebRTCClient::OnCandidate(
     rapidjson::Document& doc
@@ -537,37 +466,11 @@ WebRTCClient::OnCandidate(
 
 
 
-/**
- * @brief Handles a file-offer event.
- *
- * The current implementation initializes a peer connection with the
- * configured STUN server and gathers an initial local description. It does
- * not yet read the offer document or apply remote descriptions/candidates.
- *
- * @param doc JSON payload containing the offered file metadata and signaling
- *            data; currently unused by this implementation.
- */
 void
-WebRTCClient::OnFileOffer(
+WebRTCClient::OnOffer(
     rapidjson::Document& doc
 ) {
-    Logger::info() << "OnFileOffer";
-
-    rtc::Configuration config;
-    config.maxMessageSize = static_cast<size_t>(Properties().Get<int>("maxMessageSize"));
-
-    std::string stunServer;
-
-    auto stunAddress = Properties().Get<std::string>("stunAddress");
-    auto stunPort    = Properties().Get<int>("stunPort");
-    if (stunAddress.substr(0, 5).compare("stun:") != 0) {
-        stunServer = "stun:";
-    }
-
-    stunServer += stunAddress + ":" + std::to_string(stunPort);
-    config.iceServers.emplace_back(stunServer);
-
-    Logger::info() << stunServer;
+    Logger::info() << "OnOffer";
 
     if (!doc.HasMember("from") || !doc["from"].IsString() ||
         !doc.HasMember("room") || !doc["room"].IsString()) {
@@ -575,11 +478,11 @@ WebRTCClient::OnFileOffer(
         return;
     }
 
-    std::string from = doc["from"].GetString();
-    std::string room = doc["room"].GetString();
+    const std::string from = doc["from"].GetString();
+    const std::string room = doc["room"].GetString();
     PeerRoomKey key{from, room};
     DataChannel dataChannel;
-    dataChannel.pc = std::make_shared<rtc::PeerConnection>(config);
+    dataChannel.pc = MakePeerConnection(from, room);
     dataChannel.fileQ = CreateStringQueue();
     auto peerConnection = dataChannel.pc;
     {
@@ -641,7 +544,6 @@ WebRTCClient::OnFileOffer(
             }
         });
     });
-
 
     // 2. Set up local candidate callback (trickle ICE)
     peerConnection->onLocalCandidate([this, from, room](rtc::Candidate candidate) {
@@ -720,15 +622,6 @@ WebRTCClient::OnFileOffer(
 
 
 
-/**
- * @brief Handles a ping/pong response from the message server.
- *
- * Ignores malformed messages, non-pong messages, and pongs addressed to a
- * different client. A matching pong received while waiting transitions the
- * worker back to `CLIENT_RUN` and wakes it.
- *
- * @param doc JSON payload returned by the message server.
- */
 void
 WebRTCClient::OnPingPong(
     rapidjson::Document& doc
@@ -758,15 +651,50 @@ WebRTCClient::OnPingPong(
     }
 }
 
+void
+WebRTCClient::OnFileOffer(
+    rapidjson::Document& doc
+) {
+    if (!doc.HasMember("from") || !doc["from"].IsString() ||
+        !doc.HasMember("room") || !doc["room"].IsString() ||
+        !doc.HasMember("file") || !doc["file"].IsObject()) {
+        Logger::warn() << "FileOffer is missing its sender, room, or file metadata.";
+        return;
+    }
 
-/**
- * @brief Handles the message transport's open callback.
- *
- * Marks the transport ready and wakes the worker. The worker, rather than this
- * callback, sends the configured room-join request.
- *
- * @param peer Identifier supplied by the transport; unused by this client.
- */
+    const auto& file = doc["file"];
+    if (!file.HasMember("name") || !file["name"].IsString() ||
+        !file.HasMember("size") || !file["size"].IsInt64() ||
+        !file.HasMember("mimeType") || !file["mimeType"].IsString()) {
+        Logger::warn() << "FileOffer contains invalid file metadata.";
+        return;
+    }
+
+    Logger::info()
+        << "Received file offer from '" << doc["from"].GetString()
+        << "' in room '" << doc["room"].GetString()
+        << "': " << file["name"].GetString()
+        << " (" << file["size"].GetInt64() << " bytes, "
+        << file["mimeType"].GetString() << ").";
+}
+
+
+void
+WebRTCClient::OnFileComplete(
+    rapidjson::Document& doc
+) {
+    if (!doc.HasMember("from") || !doc["from"].IsString() ||
+        !doc.HasMember("room") || !doc["room"].IsString()) {
+        Logger::warn() << "File completion is missing its sender or room.";
+        return;
+    }
+
+    Logger::info()
+        << "File transfer to '" << doc["from"].GetString()
+        << "' in room '" << doc["room"].GetString() << "' completed.";
+}
+
+
 void
 WebRTCClient::OnMessageOpen(
     const std::string& peer
@@ -782,16 +710,6 @@ WebRTCClient::OnMessageOpen(
 
 
 
-/**
- * @brief Handles closure of the underlying message transport.
- *
- * Marks the worker as exiting and wakes it so any condition-variable wait can
- * finish. The close code and reason are currently logged only indirectly and
- * are not otherwise used.
- *
- * @param code WebSocket close code.
- * @param message WebSocket close message.
- */
 void
 WebRTCClient::OnMessageClose(
     int code,
@@ -809,27 +727,12 @@ WebRTCClient::OnMessageClose(
 
 
 
-/**
- * @brief Stops the client when it is destroyed.
- *
- * Delegates to Stop so the transport and background worker are shut down
- * before the object is released.
- */
 WebRTCClient::~WebRTCClient() {
     Stop();
 }
 
 
 
-/**
- * @brief Starts the message transport and the client worker thread.
- *
- * Resets the worker state, starts the base WebRTC transport, and launches
- * StartClient to perform the room-join and keepalive workflow. If the base
- * transport cannot start, no worker thread is launched.
- *
- * @return The result of starting the base WebRTC transport.
- */
 bool
 WebRTCClient::Start() {
     {
@@ -848,12 +751,6 @@ WebRTCClient::Start() {
 
 
 
-/**
- * @brief Requests client shutdown and joins its worker thread.
- *
- * Sets the exit state under the state mutex, wakes any worker wait, stops the
- * base transport, and joins the worker if it was started.
- */
 void
 WebRTCClient::Stop() {
     {
@@ -870,14 +767,6 @@ WebRTCClient::Stop() {
 
 
 
-/**
- * @brief Reports whether the client worker has not entered its exit state.
- *
- * This reports the client lifecycle state, not the underlying transport's
- * independent running flag.
- *
- * @return true unless the worker state is `CLIENT_EXIT`.
- */
 bool
 WebRTCClient::IsRunning() {
     std::lock_guard<std::mutex> lock(m_clientStateMutex);
@@ -885,32 +774,6 @@ WebRTCClient::IsRunning() {
 }
 
 
-/**
- * @brief Runs the client lifecycle and keepalive state machine.
- *
- * Reads configuration from the property bag, waits for the transport-open
- * callback, joins the configured room, creates a data channel for a configured
- * peer, optionally sends the configured initial file offer, then alternates
- * between an idle interval and ping/pong checks.
- * The state mutex protects state and configuration shared with callbacks; it
- * is released around transport and file-offer operations to avoid holding it
- * during external work.
- *
- * State flow:
- * - `CLIENT_INIT` waits for the transport, joins the configured room, creates
- *   the outgoing data channel when room and peer are set, and sends an initial
- *   offer when a file is also configured.
- * - `CLIENT_WAITING_FOR_JOIN` waits for this client's join notification during
- *   initialization.
- * - `CLIENT_JOINED` records successful room membership and wakes initialization.
- * - `CLIENT_RUN` waits for the timeout interval before requesting a ping.
- * - `CLIENT_PING` sends a ping and enters `CLIENT_WAIT_FOR_PONG`.
- * - `CLIENT_WAIT_FOR_PONG` returns to `CLIENT_RUN` on a matching pong, or
- *   enters `CLIENT_EXIT` on send failure or timeout.
- *
- * Invalid configuration, a failed join send, a transport close, or an
- * explicit Stop request also leads to `CLIENT_EXIT`.
- */
 void
 WebRTCClient::StartClient() {
     std::chrono::seconds timeout{Properties().Get<int>("timeout")};
@@ -1044,5 +907,32 @@ WebRTCClient::StartClient() {
                    m_clientState == ClientState::CLIENT_EXIT;
         });
     }
+}
+
+bool
+WebRTCClient::JoinRoom(
+    const std::string& room
+) {
+    rapidjson::Document doc;
+    doc.SetObject();
+    auto& allocator = doc.GetAllocator();
+    doc.AddMember("type", rapidjson::Value("join", allocator), allocator);
+    doc.AddMember("room", rapidjson::Value(room.c_str(), allocator), allocator);
+
+    rapidjson::StringBuffer buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    doc.Accept(writer);
+
+    if (!SendMessage(buffer.GetString())) {
+        Logger::error() << "Unable to send join request for room '" << room << "'.";
+        return false;
+    }
+
+    Logger::info()
+        << "Requested to join room \'"
+        << room
+        << "\'.";
+
+    return true;
 }
 

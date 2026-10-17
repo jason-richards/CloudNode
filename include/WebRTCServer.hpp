@@ -64,14 +64,35 @@ protected:
      */
     void OnFileAccept(rapidjson::Document& doc) override;
 
+    /**
+     * @brief Validates and relays an SDP offer to a peer in the same room.
+     * @param doc Offer payload containing target peer, room, SDP, and candidates.
+     */
+    void OnOffer(rapidjson::Document& doc) override;
+
+    /**
+     * @brief Relays an SDP answer to its target peer.
+     * @param doc Answer payload containing target peer and SDP.
+     */
     void OnAnswer(rapidjson::Document& doc) override;
+
+    /**
+     * @brief Relays an ICE candidate to its target peer.
+     * @param doc Candidate payload containing target peer, candidate, and MID.
+     */
     void OnCandidate(rapidjson::Document& doc) override;
 
     /**
-     * @brief Handles an incoming file-offer message and begins transfer coordination.
-     * @param doc JSON payload containing file metadata and negotiation details.
+     * @brief Validates and forwards incoming file metadata to the target peer.
+     * @param doc JSON payload containing target peer, room, and file metadata.
      */
     void OnFileOffer(rapidjson::Document& doc) override;
+
+    /**
+     * @brief Relays file completion and releases the sender's transfer state.
+     * @param doc Completion payload containing target peer and room.
+     */
+    void OnFileComplete(rapidjson::Document& doc) override;
 
     /**
      * @brief Handles ping and pong control events.
@@ -122,11 +143,13 @@ private:
     void Leave(const std::string& peer, const std::string& room);
 
     /**
-     * @brief Parses and stores file metadata extracted from a transport message.
+     * @brief Validates and forwards a file message to its intended room peer.
      *
-     * @param doc JSON payload that contains file information.
-     * @param file Output structure receiving file details.
-     * @result bool True if operation was successful.
+        * Rewrites the target peer field as the sender identity before relaying.
+    *
+        * @param doc JSON payload containing room, target peer, and file metadata.
+        * @param file Parsed file metadata associated with the request.
+        * @return true if the payload was forwarded successfully; otherwise false.
      */
     bool HandleFile(rapidjson::Document& doc, FileDetails& file);
 

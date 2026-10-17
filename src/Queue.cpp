@@ -82,12 +82,6 @@ public:
 // These functions provide the clean, non-templated interface expected by users.
 // =============================================================================
 
-/**
- * @brief Creates a new Queue instance for type T.
- * 
- * @tparam T The type of item stored in the queue.
- * @return std::shared_ptr<QueueBase<T>> Pointer to a newly created Queue.
- */
 template <typename T>
 std::shared_ptr<QueueBase<T>> CreateQueue() {                                  
   return std::make_shared<QueueBase<T>>();                                   
@@ -97,13 +91,6 @@ QueuePtr<std::string> CreateStringQueue() {
   return std::make_shared<QueueBase<std::string>>();
 }
 
-/**
- * @brief Adds an item to the specified queue.
- * 
- * @tparam T The type of item stored in the queue.
- * @param q - Pointer to the work queue.
- * @param item - Shared pointer containing the payload/item to be added.
- */
 template <typename T>
 void AddItem(                                                                
   std::shared_ptr<QueueBase<T>> q,                                          
@@ -112,13 +99,6 @@ void AddItem(
   q->AddItem(item);                                                      
 }
 
-/**
- * @brief Retrieves an item from the specified queue.
- * 
- * @tparam T The type of item stored in the queue.
- * @param q - Pointer to the work queue.
- * @return std::shared_ptr<T> A pointer to the retrieved payload/item.
- */
 template <typename T>
 std::shared_ptr<T> GetItem(                                               
   std::shared_ptr<QueueBase<T>> q                                        
@@ -126,13 +106,6 @@ std::shared_ptr<T> GetItem(
   return q->GetItem();                                                  
 }
 
-/**
- * @brief Gets the number of items in the specified queue.
- * 
- * @tparam T The type of item stored in the queue.
- * @param q - Pointer to the work queue.
- * @return size_t Number of items available.
- */
 template <typename T>
 size_t GetSize(                                                           
   std::shared_ptr<QueueBase<T>> q                                        
@@ -140,12 +113,6 @@ size_t GetSize(
   return q->GetSize();                                                  
 }
 
-/**
- * @brief Notifies all waiting threads associated with the queue.
- * 
- * @tparam T The type of item stored in the queue.
- * @param q - Pointer to the work queue.
- */
 template <typename T>
 void NotifyAll(                                                           
   std::shared_ptr<QueueBase<T>> q                                        

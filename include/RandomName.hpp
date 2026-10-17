@@ -26,8 +26,13 @@ private:
     std::mt19937 rng;
 
 public:
+    /** @brief Initializes a generator with a nondeterministic random seed. */
     RandomNameGenerator() : rng(std::random_device{}()) {}
 
+    /**
+     * @brief Generates a random compound name with a numeric suffix.
+     * @return A name assembled from random word lists and a three-digit number.
+     */
     static std::string
     Generate() {
         RandomNameGenerator g;

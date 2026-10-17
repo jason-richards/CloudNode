@@ -9,11 +9,6 @@
 
 
 
-/**
- * @brief Handles ping and pong commands by sending a pong response to the client.
- *
- * @param doc Parsed command document.
- */
 void
 WebRTCServer::OnPingPong(
     rapidjson::Document& doc
@@ -30,12 +25,6 @@ WebRTCServer::OnPingPong(
 
 
 
-/**
- * @brief Notifies a client that another client joined its room.
- *
- * @param whoToNotify Identifier of the client receiving the notification.
- * @param whoJoined Identifier of the client who joined.
- */
 void
 WebRTCServer::SendJoinNotification(
     const std::string& whoToNotify,
@@ -54,11 +43,6 @@ WebRTCServer::SendJoinNotification(
 
 
 
-/**
- * @brief Handles a join command and adds the client to the requested room.
- *
- * @param doc Parsed command document containing the room identifier.
- */
 void
 WebRTCServer::OnJoin(
     rapidjson::Document& doc
@@ -92,12 +76,6 @@ WebRTCServer::OnJoin(
 
 
 
-/**
- * @brief Notifies a client that another client left its room.
- *
- * @param whoToNotify Identifier of the client receiving the notification.
- * @param whoLeft Identifier of the client who left.
- */
 void
 WebRTCServer::SendLeaveNotification(
     const std::string& whoToNotify,
@@ -116,12 +94,6 @@ WebRTCServer::SendLeaveNotification(
 
 
 
-/**
- * @brief Removes a client from a room and notifies the remaining members.
- *
- * @param peer Identifier of the departing client.
- * @param room Room from which the client is leaving.
- */
 void
 WebRTCServer::Leave(
     const std::string& peer,
@@ -135,11 +107,6 @@ WebRTCServer::Leave(
 
 
 
-/**
- * @brief Handles a leave command received from a client.
- *
- * @param doc Parsed command document containing the room identifier.
- */
 void
 WebRTCServer::OnLeave(
     rapidjson::Document& doc
@@ -159,16 +126,6 @@ WebRTCServer::OnLeave(
 
 
 
-/**
- * @brief Validates and forwards a file command to its intended recipient.
- *
- * The sender and recipient must both belong to the requested room. The
- * forwarded document replaces the recipient field with the sender identifier.
- *
- * @param doc Parsed file command document.
- * @param file File metadata extracted from the command.
- * @result bool True if operation was successful
- */
 bool
 WebRTCServer::HandleFile(
     rapidjson::Document& doc,
@@ -223,11 +180,6 @@ WebRTCServer::HandleFile(
 
 
 
-/**
- * @brief Handles a file offer and forwards it to the requested recipient.
- *
- * @param doc Parsed file offer document.
- */
 void
 WebRTCServer::OnFileOffer(
     rapidjson::Document& doc
@@ -275,15 +227,110 @@ WebRTCServer::OnFileOffer(
     }
 }
 
-/**
- * @brief Forwards a remote WebRTC answer to the intended peer.
- *
- * The server receives an SDP answer from one client and relays it to the
- * destination client across the signalling channel. The payload is validated,
- * the peer field is removed, and the remaining JSON is sent to the recipient.
- *
- * @param doc Parsed answer payload containing the target peer and SDP text.
- */
+
+void
+WebRTCServer::OnFileComplete(
+    rapidjson::Document& doc
+) {
+    if (!doc.HasMember("peer") || !doc["peer"].IsString() ||
+        !doc.HasMember("room") || !doc["room"].IsString()) {
+        Logger::error() << "Invalid file completion command format.";
+        return;
+    }
+
+    auto source = CurrentWebSocket();
+    if (!source) {
+        Logger::error() << "Invalid websocket forwarding file completion.";
+        return;
+    }
+
+    const std::string from = source->getUserData()->x_client_id;
+    const std::string peer = doc["peer"].GetString();
+    const std::string room = doc["room"].GetString();
+    auto roomIt = m_rooms.find(room);
+    if (roomIt == m_rooms.end() ||
+        roomIt->second.find(from) == roomIt->second.end() ||
+        roomIt->second.find(peer) == roomIt->second.end()) {
+        Logger::error() << "File completion participants must both be in room '" << room << "'.";
+        return;
+    }
+
+    auto recipient = m_clientDB.find(peer);
+    if (recipient == m_clientDB.end()) {
+        Logger::error() << "User: " + peer + " not found.";
+        return;
+    }
+
+    doc.EraseMember("peer");
+    doc.AddMember(
+        rapidjson::Value("from", doc.GetAllocator()),
+        rapidjson::Value(from.c_str(), doc.GetAllocator()),
+        doc.GetAllocator()
+    );
+
+    rapidjson::StringBuffer buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    doc.Accept(writer);
+    if (!recipient->second->send(buffer.GetString())) {
+        Logger::error() << "Error forwarding file completion to '" << peer << "'.";
+        return;
+    }
+
+    m_clientStateDB[from] = ClientState::CLIENT_INIT;
+}
+
+void
+WebRTCServer::OnOffer(
+    rapidjson::Document& doc
+) {
+    Logger::info() << "OnOffer.";
+
+    if (!doc.HasMember("peer") || !doc["peer"].IsString() ||
+        !doc.HasMember("room") || !doc["room"].IsString() ||
+        !doc.HasMember("descriptions") || !doc["descriptions"].IsArray()) {
+        Logger::error() << "Invalid offer command format";
+        return;
+    }
+
+    std::string peer = doc["peer"].GetString();
+    std::string room = doc["room"].GetString();
+    auto roomIt = m_rooms.find(room);
+    auto source = CurrentWebSocket();
+    if (!source || roomIt == m_rooms.end()) {
+        Logger::error() << "Invalid offer source or room.";
+        return;
+    }
+
+    const std::string from = source->getUserData()->x_client_id;
+    if (roomIt->second.find(from) == roomIt->second.end() ||
+        roomIt->second.find(peer) == roomIt->second.end()) {
+        Logger::error() << "Offer participants must both be in room '" << room << "'.";
+        return;
+    }
+
+    auto ws = m_clientDB.find(peer);
+    if (ws == m_clientDB.end()) {
+        Logger::error() << "User: " + peer + " not found.";
+        return;
+    }
+
+    doc.EraseMember("peer");
+    doc.AddMember(
+        rapidjson::Value("from", doc.GetAllocator()),
+        rapidjson::Value(from.c_str(), doc.GetAllocator()),
+        doc.GetAllocator()
+    );
+
+    rapidjson::StringBuffer buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    doc.Accept(writer);
+    if (!ws->second->send(buffer.GetString())) {
+        Logger::error() << "Error encountered forwarding offer to \'" << peer << "\'.";
+        return;
+    }
+}
+
+
 void
 WebRTCServer::OnAnswer(
     rapidjson::Document& doc
@@ -297,7 +344,6 @@ WebRTCServer::OnAnswer(
     }
 
     std::string peer = doc["peer"].GetString();
-
     auto ws = m_clientDB.find(peer);
     if (ws == m_clientDB.end()) {
         Logger::error() << "User: " + peer + " not found.";
@@ -317,7 +363,7 @@ WebRTCServer::OnAnswer(
         rapidjson::Value(from.c_str(), doc.GetAllocator()),
         doc.GetAllocator()
     );
-    
+
     rapidjson::StringBuffer buffer;
     rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
     doc.Accept(writer);
@@ -327,15 +373,6 @@ WebRTCServer::OnAnswer(
     }
 }
 
-/**
- * @brief Relays an ICE candidate update to the target peer.
- *
- * Trickled ICE candidates arrive from a client as a candidate payload and a MID.
- * The server validates the packet, removes the forwarding metadata, and sends the
- * candidate to the peer that needs it to continue NAT traversal and connectivity.
- *
- * @param doc Parsed candidate payload containing the destination peer and ICE data.
- */
 void
 WebRTCServer::OnCandidate(
     rapidjson::Document& doc
@@ -381,11 +418,6 @@ WebRTCServer::OnCandidate(
 }
 
 
-/**
- * @brief Handles acceptance of a file offer and forwards it to the sender.
- *
- * @param doc Parsed file acceptance document.
- */
 void
 WebRTCServer::OnFileAccept(
     rapidjson::Document& doc
@@ -429,11 +461,6 @@ WebRTCServer::OnFileAccept(
 
 
 
-/**
- * @brief Handles a newly opened WebSocket connection.
- *
- * @param peer Identifier associated with the connection.
- */
 void
 WebRTCServer::OnMessageOpen(
     const std::string& peer
@@ -443,12 +470,6 @@ WebRTCServer::OnMessageOpen(
 
 
 
-/**
- * @brief Handles a closed WebSocket connection and removes its room membership.
- *
- * @param code WebSocket close code.
- * @param message WebSocket close message.
- */
 void
 WebRTCServer::OnMessageClose(
     int code,

@@ -64,24 +64,12 @@ public:
 };
 
 
-/**
- * @brief Creates a shared stop token.
- * @return A pointer to a newly created token in the not-running state.
- */
 StopTokenPtr
 CreateStopToken() {
   return StopToken::Create();
 }
 
 
-/**
- * @brief Marks a token as running.
- *
- * The token pointer must be non-null. This call locks the token's mutex and
- * blocks if it is already locked.
- *
- * @param stopper Shared pointer to the token to start.
- */
 void
 Start(
   StopTokenPtr stopper
@@ -90,14 +78,6 @@ Start(
 }
 
 
-/**
- * @brief Requests that a token stop running.
- *
- * The token pointer must be non-null, and the calling thread must own the
- * mutex acquired by Start.
- *
- * @param stopper Shared pointer to the token to stop.
- */
 void
 RequestStop(
   StopTokenPtr stopper
@@ -106,15 +86,6 @@ RequestStop(
 }
 
 
-/**
- * @brief Checks whether a stop has been requested.
- *
- * This is a non-blocking check. The token pointer must be non-null.
- *
- * @param stopper Shared pointer to the token to check.
- * @return true if the token mutex could be acquired, indicating the unlocked
- *         state; otherwise false.
- */
 bool
 StopRequested(
   StopTokenPtr stopper

@@ -14,19 +14,39 @@ LocalDescription{
     std::vector<std::string> descriptions;
     std::vector<std::string> candidates;
 
+    /** Creates a description with a fresh UUID and empty SDP/candidate lists. */
     LocalDescription();
+
+    /**
+     * @brief Copies a local description.
+     * @param other Description whose UUID, SDP, and candidates are copied.
+     */
     LocalDescription(const LocalDescription& other);
+
+    /**
+     * @brief Parses a serialized local description.
+     * @param jsonStr JSON containing a UUID and optional Base64 description arrays.
+     */
     LocalDescription(const std::string& jsonStr);
 
+    /** @return JSON representation containing the UUID and encoded arrays. */
     std::string
     toJson() const;
 
+    /** @return JSON fragment containing the Base64-encoded descriptions array. */
     std::string
     GetDescriptionsJson() const;
 
+    /** @return JSON fragment containing the Base64-encoded candidates array. */
     std::string
     GetCandidatesJson() const;
 
+    /**
+     * @brief Writes this description as its JSON representation.
+     * @param os Output stream receiving the JSON.
+     * @param obj Description to serialize.
+     * @return The output stream.
+     */
     friend std::ostream& operator<<(std::ostream& os, const LocalDescription& obj);
 
 } LocalDescription;
@@ -39,6 +59,7 @@ struct DataChannel {
     QueuePtr<std::string> fileQ;
     LocalDescription description;
 
+    /** @return true when the peer connection, data channel, and file queue exist. */
     explicit operator bool() const {
         return pc && channel && fileQ;
     }
@@ -84,10 +105,7 @@ generateUUID();
  * @return true Returns true if the input is non-empty and encoding completes successfully.
  * @return false Returns false if the input string is empty.
  *
- * @details
- * This function uses the `base64::encoder` utility. It pre-allocates the memory for the
- * output string based on an estimated size (input length * 4) to improve performance.
- * The final output has any newline characters stripped out before returning.
+ * Encoded line breaks are removed from the output.
  */
 bool
 base64Encode(
@@ -113,21 +131,19 @@ base64Decode(
 
 
 /**
- * @brief Gathers the initial RTCPeerConnection candidates.
+ * @brief Creates a data channel and gathers the initial local SDP and ICE candidates.
  *
- * This function attempts to gather the initial ICE (Interactive Connectivity Establishment) candidates from a given
- * PeerConnection. The purpose is to collect all possible candidate addresses that can be used for establishing a 
- * connection between peers in a WebRTC session.
+ * Creates a data channel on the supplied peer connection, waits for ICE
+ * gathering to finish, and stores the resulting channel, file queue, and local
+ * description in the supplied objects.
  *
- * @param dataChannel The peer connection and output handles for the created data channel and file queue.
- * @param desc A reference to a LocalDescription object, which will hold the gathered description after this
- * function completes.
- * @param time_out The maximum number of seconds to wait before timing out the operation. Defaults to 10 seconds if
- * not specified.
+ * @param dataChannel Peer connection to configure; receives the channel and queue.
+ * @param desc Receives the gathered local SDP descriptions and ICE candidates.
+ * @param time_out Maximum seconds to wait for ICE gathering; defaults to 10.
  *
- * @return bool True if the candidates were successfully gathered within the given timeout period; otherwise, false.
+ * @return true if a channel and local description were created before timeout; otherwise false.
  *
- * @note This function should be called once an RTCPeerConnection has been created and configured appropriately.
+ * @note The peer connection must be created and configured before this call.
  */
 bool
 obtainInitialDescription(

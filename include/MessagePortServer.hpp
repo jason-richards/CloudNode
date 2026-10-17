@@ -61,10 +61,10 @@ public:
     bool Start(const std::string& address, int port) override;
 
     /**
-     * @brief Sends a message to the connected peer or all active peers as appropriate.
+    * @brief Attempts to send a message through the server transport.
      *
      * @param message Serialized payload to send.
-     * @return true if the message was accepted for delivery.
+    * @return false; server-side message delivery is not implemented yet.
      */
     bool Send(const std::string& message) override;
 
