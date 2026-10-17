@@ -889,16 +889,20 @@ WebRTCClient::IsRunning() {
  * @brief Runs the client lifecycle and keepalive state machine.
  *
  * Reads configuration from the property bag, waits for the transport-open
- * callback, requests room membership, optionally sends the configured initial
- * file offer, then alternates between an idle interval and ping/pong checks.
+ * callback, joins the configured room, creates a data channel for a configured
+ * peer, optionally sends the configured initial file offer, then alternates
+ * between an idle interval and ping/pong checks.
  * The state mutex protects state and configuration shared with callbacks; it
  * is released around transport and file-offer operations to avoid holding it
  * during external work.
  *
  * State flow:
- * - `CLIENT_INIT` loads configuration and waits for the transport.
- * - `CLIENT_WAITING_FOR_JOIN` waits for this client's join notification.
- * - `CLIENT_JOINED` sends an initial offer when both peer and file are set.
+ * - `CLIENT_INIT` waits for the transport, joins the configured room, creates
+ *   the outgoing data channel when room and peer are set, and sends an initial
+ *   offer when a file is also configured.
+ * - `CLIENT_WAITING_FOR_JOIN` waits for this client's join notification during
+ *   initialization.
+ * - `CLIENT_JOINED` records successful room membership and wakes initialization.
  * - `CLIENT_RUN` waits for the timeout interval before requesting a ping.
  * - `CLIENT_PING` sends a ping and enters `CLIENT_WAIT_FOR_PONG`.
  * - `CLIENT_WAIT_FOR_PONG` returns to `CLIENT_RUN` on a matching pong, or
@@ -915,11 +919,22 @@ WebRTCClient::StartClient() {
 
     while (m_clientState != ClientState::CLIENT_EXIT) {
         if (m_clientState == ClientState::CLIENT_INIT) {
+            if (!m_clientStateChanged.wait_for(lock, timeout, [this]() {
+                return m_transportOpen || m_clientState == ClientState::CLIENT_EXIT;
+            })) {
+                Logger::warn() << "Timed out waiting for the message transport to open.";
+                m_clientState = ClientState::CLIENT_EXIT;
+                continue;
+            }
+            if (m_clientState == ClientState::CLIENT_EXIT) {
+                continue;
+            }
 
-#if 0
             // STEP 1:  If a room is set, "join" Room
             if (Properties().Contains("room")) {
                 m_room = Properties().Get<std::string>("room");
+            }
+            if (!m_room.empty()) {
                 m_clientState = ClientState::CLIENT_WAITING_FOR_JOIN;
                 if (!JoinRoom(m_room)) {
                     Logger::error()
@@ -931,20 +946,55 @@ WebRTCClient::StartClient() {
                 }
                 if (!m_clientStateChanged.wait_for(lock, timeout, 
                     [this]() {
-                        return m_clientState == ClientState::CLIENT_JOINED;
+                        return m_clientState == ClientState::CLIENT_JOINED ||
+                               m_clientState == ClientState::CLIENT_EXIT;
                     })
                 ) {
                     Logger::warn() << "Timed out waiting for \"join\" to complete.";
                     m_clientState = ClientState::CLIENT_EXIT;
                     continue;
                 };
+                if (m_clientState == ClientState::CLIENT_EXIT) {
+                    continue;
+                }
             }
 
             // STEP 2: If a peer is set, establish a datachannel
-            if (Properties().Contains("peer")) {
+            if (!m_room.empty() && Properties().Contains("peer")) {
                 m_peer = Properties().Get<std::string>("peer");
+                if (!m_peer.empty()) {
+                    const auto peer = m_peer;
+                    const auto room = m_room;
+                    lock.unlock();
+                    const bool channelCreated = MakeDataChannel(peer, room);
+                    lock.lock();
+                    if (m_clientState == ClientState::CLIENT_EXIT) {
+                        continue;
+                    }
+                    if (!channelCreated) {
+                        m_clientState = ClientState::CLIENT_EXIT;
+                        continue;
+                    }
+                }
             }
 
+
+            // STEP 3: If file is set, send it
+            if (Properties().Contains("file")) {
+                m_file = Properties().Get<std::string>("file");
+
+                if (!m_peer.empty() && !m_file.empty()) {
+                    const auto peer = m_peer;
+                    const auto room = m_room;
+                    const auto file = m_file;
+                    lock.unlock();
+                    SendFileOffer(room, peer, file);
+                    lock.lock();
+                    if (m_clientState == ClientState::CLIENT_EXIT) {
+                        continue;
+                    }
+                }
+            }
 
             m_clientState = ClientState::CLIENT_RUN;
             continue;
@@ -961,122 +1011,6 @@ WebRTCClient::StartClient() {
             }
             continue;
         }
-        if (m_clientState == ClientState::CLIENT_PING) {
-            m_clientState = ClientState::CLIENT_WAIT_FOR_PONG;
-            lock.unlock();
-            const bool sent = SendPing();
-            lock.lock();
-            if (!sent && m_clientState == ClientState::CLIENT_WAIT_FOR_PONG) {
-                m_clientState = ClientState::CLIENT_EXIT;
-            }
-            continue;
-        }
-
-        if (m_clientState == ClientState::CLIENT_WAIT_FOR_PONG) {
-            const bool interrupted = m_clientStateChanged.wait_for(
-                lock,
-                timeout,
-                [this]() { return m_clientState != ClientState::CLIENT_WAIT_FOR_PONG; }
-            );
-            if (!interrupted && m_clientState == ClientState::CLIENT_WAIT_FOR_PONG) {
-                Logger::warn() << "Timed out waiting for pong.";
-                m_clientState = ClientState::CLIENT_EXIT;
-            }
-            continue;
-        }
-#endif
-            lock.unlock();
-            std::string room;
-            std::string peer;
-            std::string file;
-            int timeoutSeconds;
-            try {
-                room = Properties().Get<std::string>("room");
-                timeoutSeconds = Properties().Get<int>("timeout");
-                if (Properties().Contains("peer")) {
-                    peer = Properties().Get<std::string>("peer");
-                }
-                if (Properties().Contains("file")) {
-                    file = Properties().Get<std::string>("file");
-                }
-            } catch (const std::exception& error) {
-                Logger::error() << "Unable to read client properties: " << error.what();
-                lock.lock();
-                m_clientState = ClientState::CLIENT_EXIT;
-                continue;
-            }
-            if (timeoutSeconds <= 0) {
-                Logger::error() << "Client timeout must be greater than zero seconds.";
-                lock.lock();
-                m_clientState = ClientState::CLIENT_EXIT;
-                continue;
-            }
-            timeout = std::chrono::seconds(timeoutSeconds);
-            lock.lock();
-
-            m_room = std::move(room);
-            m_peer = std::move(peer);
-            m_file = std::move(file);
-            m_clientStateChanged.wait(lock, [this]() {
-                return m_transportOpen || m_clientState == ClientState::CLIENT_EXIT;
-            });
-            if (m_clientState == ClientState::CLIENT_EXIT) {
-                break;
-            }
-
-            if (m_room.empty()) {
-                Logger::warn() << "No 'room' to join specified.";
-                m_clientState = ClientState::CLIENT_RUN;
-                continue;
-            }
-
-            if (!m_peer.empty()) {
-                lock.unlock();
-                const bool channelCreated = MakeDataChannel(m_peer, m_room);
-                lock.lock();
-                if (!channelCreated && m_clientState != ClientState::CLIENT_EXIT) {
-                    m_clientState = ClientState::CLIENT_EXIT;
-                    continue;
-                }
-            }
-
-            m_clientState = ClientState::CLIENT_WAITING_FOR_JOIN;
-            lock.unlock();
-            const bool sent = JoinRoom(m_room);
-            lock.lock();
-            if (!sent && m_clientState != ClientState::CLIENT_EXIT) {
-                m_clientState = ClientState::CLIENT_EXIT;
-            }
-            continue;
-        }
-
-        if (m_clientState == ClientState::CLIENT_JOINED) {
-            const auto room = m_room;
-            const auto peer = m_peer;
-            const auto file = m_file;
-            lock.unlock();
-            if (!peer.empty() && !file.empty()) {
-                SendFileOffer(room, peer, file);
-            }
-            lock.lock();
-            if (m_clientState == ClientState::CLIENT_JOINED) {
-                m_clientState = ClientState::CLIENT_RUN;
-            }
-            continue;
-        }
-
-        if (m_clientState == ClientState::CLIENT_RUN) {
-            const bool interrupted = m_clientStateChanged.wait_for(
-                lock,
-                timeout,
-                [this]() { return m_clientState != ClientState::CLIENT_RUN; }
-            );
-            if (!interrupted && m_clientState == ClientState::CLIENT_RUN) {
-                m_clientState = ClientState::CLIENT_PING;
-            }
-            continue;
-        }
-
         if (m_clientState == ClientState::CLIENT_PING) {
             m_clientState = ClientState::CLIENT_WAIT_FOR_PONG;
             lock.unlock();
