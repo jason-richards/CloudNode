@@ -20,8 +20,9 @@
  * @brief Concrete WebRTC endpoint used by application clients.
  *
  * The client manages connection lifecycle, room membership, and the ping/pong
- * protocol used to keep the peer link alive. It is also responsible for sending
- * initial file offers that contain metadata, local SDP, and ICE candidates.
+ * protocol used to keep the peer link alive. It creates an outgoing data
+ * channel for a configured peer and sends initial file offers containing file
+ * metadata, the local SDP description, and ICE candidates.
  */
 class WebRTCClient final : public WebRTC {
 public:
@@ -85,15 +86,16 @@ public:
     bool SendPing();
 
     /**
-     * @brief Builds and sends a file-offer payload to a peer.
+    * @brief Queues a file and sends its file-offer payload to a peer.
      *
-     * The message includes the target room, recipient, file metadata, the local
-     * SDP description, and the collected ICE candidates required to establish the
-     * WebRTC connection.
+    * The outgoing data channel must already have been created for the peer and
+    * room. This method validates the file, queues its path for transfer, and
+    * sends a signalling message with its metadata and the channel's gathered
+    * SDP description and ICE candidates.
      *
      * @param room Room that contains the sender and recipient.
      * @param peer Identifier of the intended file recipient.
-     * @param fileDetails Path or metadata string used by `MimeDetector`.
+    * @param fileDetails Path to the file that will be transferred.
      */
     void
     SendFileOffer(
@@ -103,6 +105,18 @@ public:
     );
 
 
+    /**
+     * @brief Creates and stores the outgoing data channel for a peer in a room.
+     *
+     * Configures the peer connection, gathers its initial SDP description and
+     * ICE candidates, and installs callbacks to transfer queued files when the
+     * channel opens.
+     *
+     * @param peer Identifier of the intended remote peer.
+     * @param room Room containing the local client and remote peer.
+     * @return true if the data channel and initial description were created;
+     *         otherwise false.
+     */
     bool
     MakeDataChannel(
         const std::string& peer,
