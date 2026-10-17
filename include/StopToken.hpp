@@ -10,35 +10,36 @@ class StopToken;
 using StopTokenPtr = std::shared_ptr<StopToken>;
 
 
-/* Create a new StopToken Pointer.
- *
- * @result StopTokenPtr - Pointer to a new StopToken object.
+/**
+ * @brief Creates a shared stop token in its not-running state.
+ * @return Pointer to the newly allocated token.
  */
 StopTokenPtr
 CreateStopToken();
 
 
-/* Put the stopper in a running state.
- *
- * @param stopper - Pointer to a StopToken object;
+/**
+ * @brief Marks the token as running by acquiring its state mutex.
+ * @param stopper Token to start; must be non-null.
  */
 void
-Start(StopTokenPtr);
+Start(StopTokenPtr stopper);
 
 
-/* Request an asynchronous stop.
- *
- * @param stopper - Pointer to a StopToken object;
+/**
+ * @brief Requests that a running token stop.
+ * @param stopper Token to stop; must be non-null and started by this thread.
  */
 void
-RequestStop(StopTokenPtr);
+RequestStop(StopTokenPtr stopper);
 
 
-/* Check if stop was requested.
- *
- * @param stopper - Pointer to a StopToken object;
+/**
+ * @brief Checks without blocking whether stop was requested.
+ * @param stopper Token to inspect; must be non-null.
+ * @return true if stop was requested; otherwise false.
  */
 bool
-StopRequested(StopTokenPtr);
+StopRequested(StopTokenPtr stopper);
 
 

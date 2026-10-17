@@ -1,31 +1,18 @@
 #include "MessagePortClient.hpp"
 #include "Logger.hpp"
 
-/** Registers the callback invoked when a message is received. */
 void MessagePortClient::OnMessage(MessageCallback callback) {
     m_messageCallback = std::move(callback);
 }
 
-/** Registers the callback invoked when the WebSocket connection closes. */
 void MessagePortClient::OnClose(CloseCallback callback) {
     m_closeCallback = std::move(callback);
 }
 
-/** Registers the callback invoked after the WebSocket connection opens. */
 void MessagePortClient::OnOpen(OpenCallback callback) {
     m_openCallback = std::move(callback);
 }
 
-/**
- * Creates and starts the WebSocket client.
- *
- * The client identifies itself with the configured name in the
- * `x-client-id` request header. WebSocket events are translated into the
- * registered callbacks, and the socket's event loop runs on a background
- * thread.
- *
- * @return false when the client is already running; true when startup begins.
- */
 bool MessagePortClient::Start(const std::string& address, int port) {
     std::unique_lock<std::mutex> lock(m_mtx);
     if (m_isRunning) {
@@ -92,7 +79,6 @@ bool MessagePortClient::Start(const std::string& address, int port) {
     return true;
 }
 
-/** Sends a text message through the active WebSocket connection. */
 bool MessagePortClient::Send(const std::string& message) {
     std::lock_guard<std::mutex> lock(m_mtx);
     if (!m_socket || !m_isRunning) {
@@ -102,7 +88,6 @@ bool MessagePortClient::Send(const std::string& message) {
     return m_socket->send(message).success;
 }
 
-/** Stops the WebSocket and waits for its background thread to finish. */
 void MessagePortClient::Stop() {
     {
         std::lock_guard<std::mutex> lock(m_mtx);
@@ -119,7 +104,6 @@ void MessagePortClient::Stop() {
     }
 }
 
-/** Returns whether the client has received an open event and remains active. */
 bool MessagePortClient::IsRunning() {
     std::lock_guard<std::mutex> lock(m_mtx);
     return m_isRunning;

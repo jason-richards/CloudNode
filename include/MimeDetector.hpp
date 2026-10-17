@@ -103,10 +103,9 @@ public:
      * a JSON object. If any step fails, the method returns a JSON error payload
      * instead of propagating an exception.
      *
-     * @param filename Path to the file to inspect.
-     * @return std::string JSON payload such as:
-     *         {"name": "example.pdf", "size": 12345, "mimeType": "application/pdf"}
-     *         or an error object on failure.
+    * @param filename Path to the file to inspect.
+    * @param info Output JSON object containing name, size, and MIME type, or an error object.
+    * @return true if metadata was generated; false if file inspection failed.
      */
     inline bool
     get_file_info (

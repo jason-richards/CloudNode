@@ -132,6 +132,9 @@ public:
             case string_hash("file_accept"):
                 OnFileAccept(doc);
                 break;
+            case string_hash("offer"):
+                OnOffer(doc);
+                break;
             case string_hash("answer"):
                 OnAnswer(doc);
                 break;
@@ -140,6 +143,9 @@ public:
                 break;
             case string_hash("file_offer"):
                 OnFileOffer(doc);
+                break;
+            case string_hash("file_complete"):
+                OnFileComplete(doc);
                 break;
             case string_hash("ping"):
             case string_hash("pong"):
@@ -197,11 +203,33 @@ protected:
     virtual void OnFileAccept(rapidjson::Document& doc) = 0;
 
     /**
-     * @brief Handles a file-offer message, usually for establishing a peer-to-peer file transfer.
-     * @param doc Parsed JSON file-offer payload.
+    * @brief Handles file metadata for an incoming peer-to-peer transfer.
+    * @param doc Parsed JSON file-offer payload.
      */
     virtual void OnFileOffer(rapidjson::Document& doc) = 0;
+
+    /**
+     * @brief Handles notification that a peer finished receiving a file.
+     * @param doc Parsed JSON completion payload.
+     */
+    virtual void OnFileComplete(rapidjson::Document& doc) = 0;
+
+    /**
+     * @brief Handles an incoming SDP offer and its ICE candidates.
+     * @param doc Parsed JSON offer payload.
+     */
+    virtual void OnOffer(rapidjson::Document& doc) = 0;
+
+    /**
+     * @brief Handles an SDP answer for an established peer connection.
+     * @param doc Parsed JSON answer payload.
+     */
     virtual void OnAnswer(rapidjson::Document& doc) = 0;
+
+    /**
+     * @brief Adds a remote ICE candidate to an established peer connection.
+     * @param doc Parsed JSON candidate payload.
+     */
     virtual void OnCandidate(rapidjson::Document& doc) = 0;
 
     /**

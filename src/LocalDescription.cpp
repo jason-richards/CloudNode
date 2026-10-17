@@ -22,23 +22,6 @@
  * `rtc::PeerConnection`.
  */
 
-/**
- * @brief Generates a random Universally Unique Identifier (UUID) Version 4.
- *
- * This function creates a random 128-bit number compliant with RFC 4122, Version 4.
- * It uses the system's entropy source to generate entropy and then formats the
- * resulting bytes into a standard string representation: 8-4-4-4-12.
- *
- * The UUID is mathematically unique with an estimated probability of collision
- * being approximately $1 \text{ in } 2^{122}$.
- *
- * @return std::string A new UUID string formatted as: 
- *                     8 hexadecimal digits-4 hexadecimal digits-4 hexadecimal digits-4 hexadecimal digits-12 hexadecimal digits.
- *
- * @example
- *   std::string id = generateUUID();
- *   std::cout << "ID: " << id << std::endl;
- */
 std::string
 generateUUID() {
     // 1. Create a random number generator using the entropy of the OS
@@ -77,19 +60,6 @@ generateUUID() {
 }
 
 
-/**
- * @brief Encodes a string into Base64 format.
- *
- * @param input The raw string data to be encoded.
- * @param encoded The output string where the Base64 encoded data will be stored.
- * @return true Returns true if the input is non-empty and encoding completes successfully.
- * @return false Returns false if the input string is empty.
- *
- * @details
- * This function uses the `base64::encoder` utility. It pre-allocates the memory for the
- * output string based on an estimated size (input length * 4) to improve performance.
- * The final output has any newline characters stripped out before returning.
- */
 bool
 base64Encode(
     const std::string& input,
@@ -119,14 +89,6 @@ base64Encode(
 }
 
 
-/**
- * @brief Decodes a Base64 encoded string back into its original form.
- *
- * @param input The Base64 encoded string to be decoded.
- * @param decoded The output string where the original decoded data will be stored.
- * @return true Returns true if the input is non-empty and decoding completes successfully.
- * @return false Returns false if the input string is empty.
- */
 bool
 base64Decode(
     const std::string &input,
@@ -148,20 +110,8 @@ base64Decode(
 }
 
 
-/**
- * @brief Constructs a new LocalDescription with a generated UUID.
- *
- * The default constructor assigns a fresh RFC 4122 UUID v4 and leaves the
- * serialized description and candidate collections empty.
- */
 LocalDescription::LocalDescription() : UUID(generateUUID()) {};
 
-/**
- * @brief Copies the contents of another LocalDescription.
- *
- * @param other The source instance whose UUID, description list, and candidate list
- *              should be duplicated.
- */
 LocalDescription::LocalDescription(
     const LocalDescription& other
 ) {
@@ -170,16 +120,6 @@ LocalDescription::LocalDescription(
     this->candidates = other.candidates;
 }
 
-/**
- * @brief Rebuilds a LocalDescription from a JSON payload.
- *
- * The input document is expected to contain a UUID string and optional
- * `descriptions` and `candidates` arrays, where each item is Base64-encoded.
- * When parsing succeeds, the arrays are decoded back to their original string
- * values and appended to the destination vectors.
- *
- * @param jsonStr JSON text produced by `toJson()` or a compatible structure.
- */
 LocalDescription::LocalDescription(
     const std::string& jsonStr
 ) {
@@ -211,14 +151,6 @@ LocalDescription::LocalDescription(
     processArrays("candidates",   candidates);
 }
 
-/**
- * @brief Produces a JSON fragment for the `descriptions` array.
- *
- * Each stored description is Base64-encoded so it can be safely embedded in a
- * JSON string without invalid characters or binary content.
- *
- * @return std::string A JSON array fragment beginning with `"descriptions"`.
- */
 std::string
 LocalDescription::GetDescriptionsJson() const {
     std::ostringstream oss;
@@ -237,14 +169,6 @@ LocalDescription::GetDescriptionsJson() const {
     return oss.str();
 }
 
-/**
- * @brief Produces a JSON fragment for the `candidates` array.
- *
- * Similar to descriptions, ICE candidates are stored as base64 values so that
- * their textual representation remains valid JSON and can be round-tripped.
- *
- * @return std::string A JSON array fragment beginning with `"candidates"`.
- */
 std::string
 LocalDescription::GetCandidatesJson() const {
     std::ostringstream oss;
@@ -263,15 +187,6 @@ LocalDescription::GetCandidatesJson() const {
     return oss.str();
 }
 
-/**
- * @brief Serializes the LocalDescription object to a JSON document.
- *
- * The output is a compact object containing the UUID and both arrays of
- * encoded values. This format is used to transfer a local peer description over
- * text-based channels without exposing raw binary or otherwise unsafe content.
- *
- * @return std::string A JSON representation of the instance.
- */
 std::string
 LocalDescription::toJson() const {
     std::ostringstream oss;
@@ -299,24 +214,6 @@ LocalDescription::toJson() const {
     return oss.str();
 }
 
-/**
- * @brief Gathers the initial local SDP and ICE candidates for a peer connection.
- *
- * This helper installs callbacks on the provided WebRTC peer connection so it can
- * collect the generated description and any ICE candidates until gathering is
- * complete or the timeout expires. The `LocalDescription` instance is populated
- * in-place with both the SDP descriptions and candidate strings.
- *
- * @param pc Shared pointer to the peer connection whose local data should be
- *           observed.
- * @param desc Destination object that receives the gathered descriptions and
- *             candidates.
- * @param time_out Maximum number of seconds to wait for gathering to complete.
- *
- * @return true if gathering completed before the timeout, false if the peer
- *         connection was null, the data channel could not be created, or the wait
- *         timed out.
- */
 bool
 obtainInitialDescription(
     DataChannel& dataChannel,

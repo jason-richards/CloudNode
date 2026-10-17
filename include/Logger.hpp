@@ -12,6 +12,7 @@ public:
 
     class LogStream {
     public:
+        /** @brief Starts a log line with timestamp and severity prefix. */
         LogStream(Level level, std::mutex& mtx) : m_mutex(mtx) {
             // 1. Generate and attach the timestamp
             m_stream << "[" << get_timestamp() << "] ";
@@ -35,25 +36,28 @@ public:
         }
 
         // Lock the shared mutex during destruction to safely print the full line
+        /** @brief Writes the completed line to the selected output stream. */
         ~LogStream() {
             m_stream << "\n";
             std::lock_guard<std::mutex> lock(m_mutex);
             *m_out_target << m_stream.str();
         }
 
+        /** @brief Appends a value to the pending log line. */
         template <typename T>
         LogStream& operator<<(const T& value) {
             m_stream << value;
             return *this;
         }
 
+        /** @brief Appends an ostream manipulator to the pending log line. */
         LogStream& operator<<(std::ostream& (*manip)(std::ostream&)) {
             m_stream << manip;
             return *this;
         }
 
     private:
-        // Helper function to fetch modern time formatting thread-safely
+        /** @brief Formats the current local time for a log prefix. */
         std::string get_timestamp() {
             auto now = std::chrono::system_clock::now();
             auto time = std::chrono::system_clock::to_time_t(now);
@@ -76,13 +80,18 @@ public:
     };
 
     // Static hooks referencing a shared global mutex
+    /** @return A stream that writes an informational log line. */
     static LogStream info()    { return LogStream(Level::Info, get_mutex()); }
+    /** @return A stream that writes a warning log line. */
     static LogStream warn()    { return LogStream(Level::Warning, get_mutex()); }
+    /** @return A stream that writes an error log line. */
     static LogStream error()   { return LogStream(Level::Error, get_mutex()); }
+    /** @return A stream that writes a success log line. */
     static LogStream success() { return LogStream(Level::Success, get_mutex()); }
 
 private:
     // Meyers Singleton pattern ensures a single thread-safe instance of the mutex
+    /** @brief Returns the mutex shared by all log streams. */
     static std::mutex& get_mutex() {
         static std::mutex mtx;
         return mtx;

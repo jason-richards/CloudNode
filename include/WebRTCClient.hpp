@@ -19,10 +19,9 @@
  * @class WebRTCClient
  * @brief Concrete WebRTC endpoint used by application clients.
  *
- * The client manages connection lifecycle, room membership, and the ping/pong
- * protocol used to keep the peer link alive. It creates an outgoing data
- * channel for a configured peer and sends initial file offers containing file
- * metadata, the local SDP description, and ICE candidates.
+ * The client manages connection lifecycle, room membership, peer negotiation,
+ * file transfers, and the ping/pong protocol used to keep the signalling
+ * transport alive.
  */
 class WebRTCClient final : public WebRTC {
 public:
@@ -86,16 +85,16 @@ public:
     bool SendPing();
 
     /**
-    * @brief Queues a file and sends its file-offer payload to a peer.
+     * @brief Queues a file and sends its metadata offer to a peer.
      *
-    * The outgoing data channel must already have been created for the peer and
-    * room. This method validates the file, queues its path for transfer, and
-    * sends a signalling message with its metadata and the channel's gathered
-    * SDP description and ICE candidates.
+     * The outgoing data channel must already have been created for the peer and
+     * room. This method validates the file, queues its path for transfer, and
+     * sends a `file_offer` signalling message containing its metadata. SDP and
+     * ICE candidates are sent separately during channel creation.
      *
      * @param room Room that contains the sender and recipient.
      * @param peer Identifier of the intended file recipient.
-    * @param fileDetails Path to the file that will be transferred.
+     * @param fileDetails Path to the file that will be transferred.
      */
     void
     SendFileOffer(
@@ -106,16 +105,17 @@ public:
 
 
     /**
-     * @brief Creates and stores the outgoing data channel for a peer in a room.
+     * @brief Creates an outgoing data channel and initiates peer negotiation.
      *
      * Configures the peer connection, gathers its initial SDP description and
-     * ICE candidates, and installs callbacks to transfer queued files when the
-     * channel opens.
+     * ICE candidates, stores the channel, and sends them to the peer in an
+     * `offer` message. When the channel opens, a worker sends each file path
+     * added to the channel's queue and signals completion after each transfer.
      *
      * @param peer Identifier of the intended remote peer.
      * @param room Room containing the local client and remote peer.
-     * @return true if the data channel and initial description were created;
-     *         otherwise false.
+    * @return true if the channel was created and the offer was sent;
+    *         otherwise false.
      */
     bool
     MakeDataChannel(
@@ -138,18 +138,40 @@ protected:
     void OnLeave(rapidjson::Document& doc) override;
 
     /**
-     * @brief Handles a file-accept acknowledgement.
-     * @param doc JSON payload returned by the remote side accepting a transfer.
+     * @brief Applies a file-accept response's remote SDP and ICE candidates.
+     * @param doc JSON payload returned by the accepting peer.
      */
     void OnFileAccept(rapidjson::Document& doc) override;
+
+    /**
+     * @brief Applies an incoming SDP offer and sends the corresponding answer.
+     * @param doc Offer payload containing sender, room, descriptions, and candidates.
+     */
+    void OnOffer(rapidjson::Document& doc) override;
+
+    /**
+     * @brief Applies a remote SDP answer to the matching peer connection.
+     * @param doc Answer payload containing sender, room, and SDP.
+     */
     void OnAnswer(rapidjson::Document& doc) override;
+
+    /**
+     * @brief Applies a remote ICE candidate to the matching peer connection.
+     * @param doc Candidate payload containing sender, room, candidate, and MID.
+     */
     void OnCandidate(rapidjson::Document& doc) override;
 
     /**
-     * @brief Handles a remote file offer received by the client.
-     * @param doc JSON payload describing the incoming file transfer.
+     * @brief Handles file metadata sent for an incoming transfer.
+     * @param doc JSON payload containing sender, room, and file metadata.
      */
     void OnFileOffer(rapidjson::Document& doc) override;
+
+    /**
+     * @brief Handles notice that a remote peer completed a file transfer.
+     * @param doc JSON payload containing sender and room.
+     */
+    void OnFileComplete(rapidjson::Document& doc) override;
 
     /**
      * @brief Handles ping and pong protocol messages.
@@ -174,9 +196,34 @@ private:
 
     /**
      * @brief Starts the background client worker thread and process loop.
+         *
+         * Loads runtime properties, waits for the transport, performs room and
+         * peer initialization, and runs the keepalive state machine.
      */
     void StartClient();
 
+    /**
+     * @brief Creates a peer connection using the configured ICE and message settings.
+     *
+     * The peer and room identify the connection in logs; connection settings,
+     * including the maximum message size and STUN server, are read from the
+     * client's property bag.
+     *
+     * @param peer Remote peer identifier associated with this connection.
+     * @param room Room associated with this connection.
+     * @return A configured peer connection.
+     */
+    std::shared_ptr<rtc::PeerConnection> MakePeerConnection(
+        const std::string& peer,
+        const std::string& room
+    );
+
+    /**
+     * @brief Finds the peer connection associated with a peer and room.
+     * @param peer Remote peer identifier.
+     * @param room Room identifier.
+     * @return The matching connection, or nullptr if none is stored.
+     */
     std::shared_ptr<rtc::PeerConnection> FindPeerConnection(
         const std::string& peer,
         const std::string& room
