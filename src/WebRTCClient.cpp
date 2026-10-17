@@ -165,13 +165,8 @@ WebRTCClient::MakeDataChannel(
                 }
 
                 if (transferSucceeded && channel->isOpen()) {
-                    Logger::info() << "File data sent: " << filePath;
-                    const std::string completion =
-                        "{\"type\":\"file_complete\",\"room\":\"" + room +
-                        "\",\"peer\":\"" + peer + "\"}";
-                    if (!SendMessage(completion)) {
-                        Logger::error() << "Unable to send file completion for: " << filePath;
-                    }
+                    Logger::info() << "File data successfully sent: " << filePath;
+                    SendFileComplete(room, peer);
                 }
             }
         }).detach();
@@ -265,6 +260,7 @@ WebRTCClient::SendFileOffer(
 }
 
 
+
 bool
 WebRTCClient::SendPing() {
     if (!SendMessage("{ \"type\" : \"ping\" }")) {
@@ -272,6 +268,26 @@ WebRTCClient::SendPing() {
         return false;
     }
     return true;
+}
+
+
+
+void
+WebRTCClient::SendFileComplete(
+    const std::string& room,
+    const std::string& peer
+) {
+    Logger::info()
+        << "SendFileComplete: "
+        << peer
+        << ":"
+        << room;
+
+    const std::string payload = "{\"type\" : \"file_complete\", \"room\" : \"" + room + "\", \"peer\" : \"" + peer + "\"}";
+
+    if (!SendMessage(payload)) {
+        Logger::error() << "Unable to send file completion.";
+    }
 }
 
 
@@ -774,6 +790,7 @@ WebRTCClient::IsRunning() {
 }
 
 
+
 void
 WebRTCClient::StartClient() {
     std::chrono::seconds timeout{Properties().Get<int>("timeout")};
@@ -908,6 +925,8 @@ WebRTCClient::StartClient() {
         });
     }
 }
+
+
 
 bool
 WebRTCClient::JoinRoom(
