@@ -353,13 +353,24 @@ WebRTCClient::OnJoin(
         return;
     }
 
+    if (!doc.HasMember("peers") || !doc["peers"].IsArray()) {
+        Logger::warn() << "Join command with no peers list.";
+        return;
+    }
+
     std::string room = doc["room"].GetString();
     std::string peer = doc["peerId"].GetString();
     const std::string clientName = Properties().Get<std::string>("name");
 
-    if (!Join(peer, room)) {
-        return;
+    std::set<std::string> peers;
+    for (const auto& peerValue : doc["peers"].GetArray()) {
+        if (!peerValue.IsString()) {
+            Logger::warn() << "Join command contains an invalid peer identifier.";
+            return;
+        }
+        peers.insert(peerValue.GetString());
     }
+    m_rooms[room] = std::move(peers);
 
     std::lock_guard<std::mutex> lock(m_clientStateMutex);
     if (m_clientState == ClientState::CLIENT_WAITING_FOR_JOIN &&

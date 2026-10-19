@@ -6,6 +6,7 @@
 #include "rapidjson/writer.h"
 
 #include <algorithm>
+#include <utility>
 
 
 
@@ -29,7 +30,8 @@ void
 WebRTCServer::SendJoinNotification(
     const std::string& whoToNotify,
     const std::string& whoJoined,
-    const std::string& room
+    const std::string& room,
+    const std::set<std::string>& peers
 ) {
     auto ws = m_clientDB.find(whoToNotify);
     if (ws == m_clientDB.end()) {
@@ -38,7 +40,23 @@ WebRTCServer::SendJoinNotification(
     }
 
     Logger::info() << "Notifying \'" << whoToNotify << "\' that \'" << whoJoined << "\' joined.";
-    ws->second->send("{\"type\" : \"peer_joined\", \"peerId\" : \"" + whoJoined + "\", \"room\" : \"" + room + "\" }");
+    rapidjson::Document doc;
+    doc.SetObject();
+    auto& allocator = doc.GetAllocator();
+    doc.AddMember("type", "peer_joined", allocator);
+    doc.AddMember("peerId", rapidjson::Value(whoJoined.c_str(), allocator), allocator);
+    doc.AddMember("room", rapidjson::Value(room.c_str(), allocator), allocator);
+
+    rapidjson::Value peerList(rapidjson::kArrayType);
+    for (const auto& peer : peers) {
+        peerList.PushBack(rapidjson::Value(peer.c_str(), allocator), allocator);
+    }
+    doc.AddMember("peers", std::move(peerList), allocator);
+
+    rapidjson::StringBuffer buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    doc.Accept(writer);
+    ws->second->send(buffer.GetString());
 }
 
 
@@ -68,7 +86,7 @@ WebRTCServer::OnJoin(
 
     m_clientDB[peer] = ws;
     for (auto u : m_rooms[room]) {
-        SendJoinNotification(u, peer, room);
+        SendJoinNotification(u, peer, room, m_rooms[room]);
     }
 
     m_clientStateDB[peer] = ClientState::CLIENT_INIT;

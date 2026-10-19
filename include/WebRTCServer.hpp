@@ -129,7 +129,12 @@ private:
      * @param whoJoined New peer that joined the room.
      * @param room Room in which the join occurred.
      */
-    void SendJoinNotification(const std::string& whoToNotify, const std::string& whoJoined, const std::string& room);
+    void SendJoinNotification(
+        const std::string& whoToNotify,
+        const std::string& whoJoined,
+        const std::string& room,
+        const std::set<std::string>& peers
+    );
 
     /**
      * @brief Sends a leave notification to a peer in a room.
