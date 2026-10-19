@@ -129,3 +129,7 @@ template std::shared_ptr<std::string> GetItem<std::string>(
   QueuePtr<std::string> queue
 );
 
+template size_t GetSize<std::string>(
+  QueuePtr<std::string> queue
+);
+
