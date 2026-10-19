@@ -442,7 +442,7 @@ WebRTCServer::OnFileAccept(
         << "File offer accept from \'"
         << id
         << "\', to \'"
-        << doc["to"].GetString()
+        << doc["peer"].GetString()
         << "\': "
         << file.name;
 
@@ -459,6 +459,25 @@ WebRTCServer::OnFileAccept(
     }
 }
 
+
+
+void
+WebRTCServer::OnFileReject(
+    rapidjson::Document& doc
+) {
+    if (!doc.HasMember("file") || !doc["file"].IsObject() ||
+        !doc["file"].HasMember("name") || !doc["file"]["name"].IsString() ||
+        !doc.HasMember("peer") || !doc["peer"].IsString()) {
+        Logger::error() << "Invalid file reject command.";
+        return;
+    }
+
+    FileDetails file{doc["file"]["name"].GetString(), 0, ""};
+    const std::string sender = doc["peer"].GetString();
+    if (HandleFile(doc, file)) {
+        m_clientStateDB[sender] = ClientState::CLIENT_INIT;
+    }
+}
 
 
 void
