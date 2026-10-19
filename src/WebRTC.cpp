@@ -54,11 +54,18 @@ bool WebRTC::IsRunning() {
 }
 
 bool
+WebRTC::
 GetPeers(
     const std::string& room,
     std::vector<std::string>& peers
 ) {
-    return false;
+    auto roomIt = m_rooms.find(room);
+    if (roomIt == m_rooms.end()) {
+        return false;
+    }
+
+    peers.assign(roomIt->second.begin(), roomIt->second.end());
+    return true;
 }
 
 bool

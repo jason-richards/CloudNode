@@ -142,8 +142,11 @@ find_path(RAPIDJSON_INCLUDE_DIR
 add_library(RapidJSON INTERFACE)
 
 file(GLOB SOURCES CONFIGURE_DEPENDS src/*.cpp)
-add_executable(CloudNode ${SOURCES})
-target_link_libraries(CloudNode PRIVATE
+list(REMOVE_ITEM SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/CloudNode.cpp")
+
+add_library(CloudNodeCore STATIC ${SOURCES})
+target_include_directories(CloudNodeCore PUBLIC include)
+target_link_libraries(CloudNodeCore PUBLIC
     datachannel
     zmq 
     RapidJSON
@@ -156,13 +159,16 @@ target_link_libraries(CloudNode PRIVATE
 )
 
 if(TARGET ixwebsocket)
-    target_link_libraries(CloudNode PRIVATE ixwebsocket)
+    target_link_libraries(CloudNodeCore PUBLIC ixwebsocket)
 elseif(TARGET ixwebsocket::ixwebsocket)
-    target_link_libraries(CloudNode PRIVATE ixwebsocket::ixwebsocket)
+    target_link_libraries(CloudNodeCore PUBLIC ixwebsocket::ixwebsocket)
 else()
     message(FATAL_ERROR "IXWebSocket target was not created by FetchContent.")
 endif()
-target_include_directories(CloudNode PRIVATE ${B64_INCLUDE_DIR} ${RAPIDJSON_INCLUDE_DIR})
+target_include_directories(CloudNodeCore PUBLIC ${B64_INCLUDE_DIR} ${RAPIDJSON_INCLUDE_DIR})
+
+add_executable(CloudNode src/CloudNode.cpp)
+target_link_libraries(CloudNode PRIVATE CloudNodeCore)
 
 
 # UPDATE Commandline Parser
@@ -188,6 +194,7 @@ add_custom_target(
 
 
 
-# Testing setup
-#enable_testing()
-#add_subdirectory(tests)
+include(CTest)
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
