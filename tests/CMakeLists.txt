@@ -19,3 +19,12 @@ target_link_libraries(CloudNodeTests PRIVATE
 )
 
 gtest_discover_tests(CloudNodeTests)
+
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+add_test(
+    NAME CloudNodeThreeProcessFileTransfer
+    COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/three_process_file_transfer.py
+        $<TARGET_FILE:CloudNode>
+)
+set_tests_properties(CloudNodeThreeProcessFileTransfer PROPERTIES TIMEOUT 90)
