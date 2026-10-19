@@ -65,6 +65,12 @@ protected:
     void OnFileAccept(rapidjson::Document& doc) override;
 
     /**
+     * @brief Relays a file rejection and releases the sender's transfer slot.
+     * @param doc JSON payload representing the rejected file.
+     */
+    void OnFileReject(rapidjson::Document& doc) override;
+
+    /**
      * @brief Validates and relays an SDP offer to a peer in the same room.
      * @param doc Offer payload containing target peer, room, SDP, and candidates.
      */

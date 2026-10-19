@@ -132,6 +132,9 @@ public:
             case string_hash("file_accept"):
                 OnFileAccept(doc);
                 break;
+            case string_hash("file_reject"):
+                OnFileReject(doc);
+                break;
             case string_hash("offer"):
                 OnOffer(doc);
                 break;
@@ -201,6 +204,12 @@ protected:
      * @param doc Parsed JSON document for file acceptance.
      */
     virtual void OnFileAccept(rapidjson::Document& doc) = 0;
+
+    /**
+     * @brief Handles a file-reject response.
+     * @param doc Parsed JSON payload for the rejected file.
+     */
+    virtual void OnFileReject(rapidjson::Document& doc) = 0;
 
     /**
     * @brief Handles file metadata for an incoming peer-to-peer transfer.

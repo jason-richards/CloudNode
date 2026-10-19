@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cstring>
 #include <fstream>
+#include <vector>
 
 std::shared_ptr<rtc::PeerConnection>
 WebRTCClient::FindPeerConnection(
@@ -80,7 +81,8 @@ WebRTCClient::MakeDataChannel(
 
     auto channel = dataChannel.channel;
     auto fileQ = dataChannel.fileQ;
-    channel->onOpen([this, fileQ, maxMessageSize, peer, room, weakChannel = rtc::weak_ptr(channel)]() {
+    auto fileDecision = dataChannel.fileDecision;
+    channel->onOpen([this, fileQ, fileDecision, maxMessageSize, peer, room, weakChannel = rtc::weak_ptr(channel)]() {
         Logger::info() << "Offering DataChannel open!";
 
         auto channel = weakChannel.lock();
@@ -102,13 +104,20 @@ WebRTCClient::MakeDataChannel(
             transfer->changed.notify_one();
         });
 
-        channel->onClosed([transfer]() {
-            std::lock_guard<std::mutex> lock(transfer->mutex);
-            transfer->closed = true;
+        channel->onClosed([transfer, fileDecision]() {
+            {
+                std::lock_guard<std::mutex> lock(transfer->mutex);
+                transfer->closed = true;
+            }
+            {
+                std::lock_guard<std::mutex> lock(fileDecision->mutex);
+                fileDecision->closed = true;
+            }
             transfer->changed.notify_one();
+            fileDecision->changed.notify_all();
         });
 
-        std::thread([this, fileQ, channel, transfer, maxMessageSize, peer, room]() {
+        std::thread([this, fileQ, fileDecision, channel, transfer, maxMessageSize, peer, room]() {
             auto waitForCapacity = [&]() {
                 std::unique_lock<std::mutex> lock(transfer->mutex);
                 transfer->changed.wait(lock, [&]() {
@@ -126,6 +135,25 @@ WebRTCClient::MakeDataChannel(
                 }
                 if (!queuedFilePath || queuedFilePath->empty()) {
                     Logger::error() << "No file path available in the data channel queue.";
+                    continue;
+                }
+
+                bool fileAccepted = false;
+                {
+                    std::unique_lock<std::mutex> lock(fileDecision->mutex);
+                    fileDecision->changed.wait(lock, [fileDecision]() {
+                        return fileDecision->fileAccepted || fileDecision->fileRejected ||
+                               fileDecision->closed;
+                    });
+                    if (fileDecision->closed || !channel->isOpen()) {
+                        return;
+                    }
+                    fileAccepted = fileDecision->fileAccepted;
+                    fileDecision->fileAccepted = false;
+                    fileDecision->fileRejected = false;
+                }
+                if (!fileAccepted) {
+                    Logger::info() << "File offer was rejected; skipping queued file.";
                     continue;
                 }
 
@@ -242,8 +270,15 @@ WebRTCClient::SendFileOffer(
         }
         dataChannel = it->second;
     }
-    AddItem(dataChannel.fileQ, std::make_shared<std::string>(fileDetails));
-
+    {
+        std::lock_guard<std::mutex> lock(m_clientStateMutex);
+        m_clientState = ClientState::CLIENT_WAIT_FOR_FILE_ACCEPT;
+    }
+    {
+        std::lock_guard<std::mutex> lock(dataChannel.fileDecision->mutex);
+        dataChannel.fileDecision->fileAccepted = false;
+        dataChannel.fileDecision->fileRejected = false;
+    }
     std::string payload = "";
     payload += "{\"type\" : \"file_offer\", ";
     payload += " \"room\" : \"" + room + "\", ";
@@ -255,8 +290,14 @@ WebRTCClient::SendFileOffer(
 
     if (!SendMessage(payload)) {
         Logger::error() << "Unable to send file_offer command for room '" << room << "'.";
+        {
+            std::lock_guard<std::mutex> lock(m_clientStateMutex);
+            m_clientState = ClientState::CLIENT_RUN;
+        }
+        m_clientStateChanged.notify_all();
         return;
     }
+    AddItem(dataChannel.fileQ, std::make_shared<std::string>(fileDetails));
 }
 
 
@@ -358,53 +399,39 @@ WebRTCClient::OnFileAccept(
 ) {
     Logger::info() << "FileAccept";
 
-    if (!doc.HasMember("descriptions") || !doc["descriptions"].IsArray()) {
-        Logger::warn() << "File accept is missing a remote description.";
-        return;
-    }
-
     const std::string peer = doc.HasMember("from") && doc["from"].IsString()
         ? doc["from"].GetString() : m_peer;
     const std::string room = doc.HasMember("room") && doc["room"].IsString()
         ? doc["room"].GetString() : m_room;
-    auto peerConnection = FindPeerConnection(peer, room);
-    if (!peerConnection) {
-        Logger::error() << "Received file accept with no active peer connection.";
+    if (peer != m_peer || room != m_room) {
+        Logger::warn() << "Ignoring file acceptance for a different peer or room.";
         return;
     }
 
-    for (rapidjson::SizeType i = 0; i < doc["descriptions"].Size(); ++i) {
-        if (!doc["descriptions"][i].IsString()) {
-            continue;
+    std::shared_ptr<FileTransferDecision> decision;
+    {
+        std::lock_guard<std::mutex> lock(m_dataChannelsMutex);
+        auto it = m_dataChannels.find({peer, room});
+        if (it == m_dataChannels.end()) {
+            Logger::error() << "Received file accept with no active data channel.";
+            return;
         }
-
-        std::string sdp;
-        if (!base64Decode(doc["descriptions"][i].GetString(), sdp)) {
-            Logger::error() << "Invalid SDP in file accept payload.";
-            continue;
-        }
-
-        Logger::info() << "Applying remote answer: " << sdp;
-        peerConnection->setRemoteDescription(rtc::Description(sdp, "answer"));
+        decision = it->second.fileDecision;
     }
+    {
+        std::lock_guard<std::mutex> lock(decision->mutex);
+        decision->fileAccepted = true;
+        decision->fileRejected = false;
+    }
+    decision->changed.notify_all();
 
-    if (doc.HasMember("candidates") && doc["candidates"].IsArray()) {
-        std::string candidate;
-        for (rapidjson::SizeType i = 0; i < doc["candidates"].Size(); ++i) {
-            if (!doc["candidates"][i].IsString()) {
-                continue;
-            }
-
-            candidate.clear();
-            if (!base64Decode(doc["candidates"][i].GetString(), candidate)) {
-                Logger::error() << "Invalid candidate in file accept payload.";
-                continue;
-            }
-
-            Logger::info() << "Adding accepted remote candidate: " << candidate;
-            peerConnection->addRemoteCandidate(rtc::Candidate(candidate, "0"));
+    {
+        std::lock_guard<std::mutex> lock(m_clientStateMutex);
+        if (m_clientState == ClientState::CLIENT_WAIT_FOR_FILE_ACCEPT) {
+            m_clientState = ClientState::CLIENT_RUN;
         }
     }
+    m_clientStateChanged.notify_all();
 }
 
 
@@ -441,6 +468,46 @@ WebRTCClient::OnAnswer(
     peerConnection->setRemoteDescription(rtc::Description(description, "answer"));
 
     Logger::info() << "Successfully set SDP.";
+}
+
+void
+WebRTCClient::OnFileReject(
+    rapidjson::Document& doc
+) {
+    const std::string peer = doc.HasMember("from") && doc["from"].IsString()
+        ? doc["from"].GetString() : m_peer;
+    const std::string room = doc.HasMember("room") && doc["room"].IsString()
+        ? doc["room"].GetString() : m_room;
+    if (peer != m_peer || room != m_room) {
+        Logger::warn() << "Ignoring file rejection for a different peer or room.";
+        return;
+    }
+
+    std::shared_ptr<FileTransferDecision> decision;
+    {
+        std::lock_guard<std::mutex> lock(m_dataChannelsMutex);
+        auto it = m_dataChannels.find({peer, room});
+        if (it == m_dataChannels.end()) {
+            Logger::warn() << "Ignoring file rejection without an active data channel.";
+            return;
+        }
+        decision = it->second.fileDecision;
+    }
+    {
+        std::lock_guard<std::mutex> lock(decision->mutex);
+        decision->fileAccepted = false;
+        decision->fileRejected = true;
+    }
+    decision->changed.notify_all();
+    Logger::info() << "File offer rejected by '" << peer << "' in room '" << room << "'.";
+
+    {
+        std::lock_guard<std::mutex> lock(m_clientStateMutex);
+        if (m_clientState == ClientState::CLIENT_WAIT_FOR_FILE_ACCEPT) {
+            m_clientState = ClientState::CLIENT_RUN;
+        }
+    }
+    m_clientStateChanged.notify_all();
 }
 
 
@@ -589,7 +656,6 @@ WebRTCClient::OnOffer(
         }
 
         std::ostringstream payload;
-
         payload << "{ \"type\" : \""
                 << std::string(description.typeString())
                 << "\", \"peer\" : \""
@@ -636,6 +702,22 @@ WebRTCClient::OnOffer(
     return;
 }
 
+
+
+void
+WebRTCClient::OnFileComplete(
+    rapidjson::Document& doc
+) {
+    if (!doc.HasMember("from") || !doc["from"].IsString() ||
+        !doc.HasMember("room") || !doc["room"].IsString()) {
+        Logger::warn() << "File completion is missing its sender or room.";
+        return;
+    }
+
+    Logger::info()
+        << "File transfer to '" << doc["from"].GetString()
+        << "' in room '" << doc["room"].GetString() << "' completed.";
+}
 
 
 void
@@ -692,24 +774,40 @@ WebRTCClient::OnFileOffer(
         << "': " << file["name"].GetString()
         << " (" << file["size"].GetInt64() << " bytes, "
         << file["mimeType"].GetString() << ").";
+
+    std::string room = doc["room"].GetString();
+    std::string peer = doc["from"].GetString();
+
+    SendFileAccept(doc);
 }
 
-
 void
-WebRTCClient::OnFileComplete(
+WebRTCClient::SendFileAccept(
     rapidjson::Document& doc
 ) {
-    if (!doc.HasMember("from") || !doc["from"].IsString() ||
-        !doc.HasMember("room") || !doc["room"].IsString()) {
-        Logger::warn() << "File completion is missing its sender or room.";
+    if (!doc.HasMember("from") || !doc["from"].IsString()) {
+        Logger::warn() << "Cannot accept a file offer without a sender.";
         return;
     }
 
-    Logger::info()
-        << "File transfer to '" << doc["from"].GetString()
-        << "' in room '" << doc["room"].GetString() << "' completed.";
-}
+    const std::string peer = doc["from"].GetString();
+    auto& allocator = doc.GetAllocator();
+    doc["type"].SetString("file_accept", allocator);
+    doc.EraseMember("from");
+    doc.EraseMember("peer");
+    doc.AddMember(
+        rapidjson::Value("peer", allocator),
+        rapidjson::Value(peer.c_str(), allocator),
+        allocator
+    );
 
+    rapidjson::StringBuffer buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    doc.Accept(writer);
+    if (!SendMessage(buffer.GetString())) {
+        Logger::error() << "Unable to send file_accept command.";
+    }
+}
 
 void
 WebRTCClient::OnMessageOpen(
@@ -725,7 +823,6 @@ WebRTCClient::OnMessageOpen(
 }
 
 
-
 void
 WebRTCClient::OnMessageClose(
     int code,
@@ -739,6 +836,7 @@ WebRTCClient::OnMessageClose(
         m_clientState = ClientState::CLIENT_EXIT;
     }
     m_clientStateChanged.notify_all();
+    WakeFileTransferWorkers();
 }
 
 
@@ -774,10 +872,32 @@ WebRTCClient::Stop() {
         m_clientState = ClientState::CLIENT_EXIT;
     }
     m_clientStateChanged.notify_all();
+    WakeFileTransferWorkers();
 
     WebRTC::Stop();
     if (m_clientThread.joinable()) {
         m_clientThread.join();
+    }
+}
+
+
+void
+WebRTCClient::WakeFileTransferWorkers() {
+    std::vector<std::shared_ptr<FileTransferDecision>> decisions;
+    {
+        std::lock_guard<std::mutex> lock(m_dataChannelsMutex);
+        for (const auto& [key, dataChannel] : m_dataChannels) {
+            (void) key;
+            decisions.push_back(dataChannel.fileDecision);
+        }
+    }
+
+    for (const auto& decision : decisions) {
+        {
+            std::lock_guard<std::mutex> lock(decision->mutex);
+            decision->closed = true;
+        }
+        decision->changed.notify_all();
     }
 }
 
@@ -876,7 +996,16 @@ WebRTCClient::StartClient() {
                 }
             }
 
-            m_clientState = ClientState::CLIENT_RUN;
+            if (m_clientState != ClientState::CLIENT_WAIT_FOR_FILE_ACCEPT) {
+                m_clientState = ClientState::CLIENT_RUN;
+            }
+            continue;
+        }
+
+        if (m_clientState == ClientState::CLIENT_WAIT_FOR_FILE_ACCEPT) {
+            m_clientStateChanged.wait(lock, [this]() {
+                return m_clientState != ClientState::CLIENT_WAIT_FOR_FILE_ACCEPT;
+            });
             continue;
         }
 
@@ -916,12 +1045,12 @@ WebRTCClient::StartClient() {
         }
 
         m_clientStateChanged.wait(lock, [this]() {
-            return m_clientState == ClientState::CLIENT_INIT ||
-                   m_clientState == ClientState::CLIENT_JOINED ||
-                   m_clientState == ClientState::CLIENT_RUN ||
-                   m_clientState == ClientState::CLIENT_PING ||
-                   m_clientState == ClientState::CLIENT_WAIT_FOR_PONG ||
-                   m_clientState == ClientState::CLIENT_EXIT;
+                 return m_clientState == ClientState::CLIENT_INIT ||
+                     m_clientState == ClientState::CLIENT_JOINED ||
+                     m_clientState == ClientState::CLIENT_RUN ||
+                     m_clientState == ClientState::CLIENT_PING ||
+                     m_clientState == ClientState::CLIENT_WAIT_FOR_PONG ||
+                     m_clientState == ClientState::CLIENT_EXIT;
         });
     }
 }

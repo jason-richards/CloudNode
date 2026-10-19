@@ -87,10 +87,11 @@ public:
     /**
      * @brief Queues a file and sends its metadata offer to a peer.
      *
-     * The outgoing data channel must already have been created for the peer and
-     * room. This method validates the file, queues its path for transfer, and
-     * sends a `file_offer` signalling message containing its metadata. SDP and
-     * ICE candidates are sent separately during channel creation.
+        * The outgoing data channel must already have been created for the peer and
+        * room. This method validates the file, sends a `file_offer` signalling
+        * message containing its metadata, and queues the path for transmission only
+        * after the peer accepts. SDP and ICE candidates are sent separately during
+        * channel creation.
      *
      * @param room Room that contains the sender and recipient.
      * @param peer Identifier of the intended file recipient.
@@ -103,6 +104,11 @@ public:
         const std::string&  fileDetails
     );
 
+
+    void
+    SendFileAccept(
+        rapidjson::Document& doc
+    );
 
     /**
      * @brief Signal file transfer complete.
@@ -127,7 +133,8 @@ public:
      * Configures the peer connection, gathers its initial SDP description and
      * ICE candidates, stores the channel, and sends them to the peer in an
      * `offer` message. When the channel opens, a worker sends each file path
-     * added to the channel's queue and signals completion after each transfer.
+        * added to the channel's queue after its offer is accepted and signals
+        * completion after each transfer.
      *
      * @param peer Identifier of the intended remote peer.
      * @param room Room containing the local client and remote peer.
@@ -154,11 +161,14 @@ protected:
      */
     void OnLeave(rapidjson::Document& doc) override;
 
-    /**
-     * @brief Applies a file-accept response's remote SDP and ICE candidates.
-     * @param doc JSON payload returned by the accepting peer.
-     */
+    /** @brief Signals that the peer accepted the pending file offer. */
     void OnFileAccept(rapidjson::Document& doc) override;
+
+    /**
+     * @brief Releases the pending file transfer after a rejection.
+     * @param doc JSON payload returned by the rejecting peer.
+     */
+    void OnFileReject(rapidjson::Document& doc) override;
 
     /**
      * @brief Applies an incoming SDP offer and sends the corresponding answer.
@@ -207,7 +217,7 @@ private:
         CLIENT_RUN,
         CLIENT_PING,
         CLIENT_WAIT_FOR_PONG,
-        CLIENT_WAIT_FOR_ACCEPT,
+        CLIENT_WAIT_FOR_FILE_ACCEPT,
         CLIENT_EXIT
     };
 
@@ -218,6 +228,9 @@ private:
          * peer initialization, and runs the keepalive state machine.
      */
     void StartClient();
+
+    /** @brief Wakes transfer workers waiting for an accept/reject decision. */
+    void WakeFileTransferWorkers();
 
     /**
      * @brief Creates a peer connection using the configured ICE and message settings.

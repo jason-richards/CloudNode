@@ -6,6 +6,8 @@
 #include <memory>
 #include <string>
 #include <iostream>
+#include <condition_variable>
+#include <mutex>
 
 
 typedef struct
@@ -53,10 +55,19 @@ LocalDescription{
 
 using LocalDescriptionPtr = std::shared_ptr<LocalDescription>;
 
+struct FileTransferDecision {
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool fileAccepted{false};
+    bool fileRejected{false};
+    bool closed{false};
+};
+
 struct DataChannel {
     std::shared_ptr<rtc::PeerConnection> pc;
     std::shared_ptr<rtc::DataChannel> channel;
     QueuePtr<std::string> fileQ;
+    std::shared_ptr<FileTransferDecision> fileDecision{std::make_shared<FileTransferDecision>()};
     LocalDescription description;
 
     /** @return true when the peer connection, data channel, and file queue exist. */
