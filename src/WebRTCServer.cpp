@@ -162,8 +162,8 @@ WebRTCServer::OnLeave(
 /**
  * @brief Validates and forwards a file command to its intended recipient.
  *
- * The sender and recipient must both belong to the requested room. The
- * forwarded document replaces the recipient field with the sender identifier.
+ * The sender and recipient must both belong to the requested room. Before
+ * forwarding, the peer field is updated to identify the authenticated sender.
  *
  * @param doc Parsed file command document.
  * @param file File metadata extracted from the command.
@@ -197,12 +197,7 @@ WebRTCServer::HandleFile(
         return false;
     }
 
-    doc.EraseMember("peer");
-    doc.AddMember(
-        rapidjson::Value("from", doc.GetAllocator()),
-        rapidjson::Value(fromId.c_str(), doc.GetAllocator()),
-        doc.GetAllocator()
-    );
+    doc["peer"].SetString(fromId.c_str(), doc.GetAllocator());
 
     auto toWs = m_clientDB.find(peerId);
     if (toWs == m_clientDB.end()) {

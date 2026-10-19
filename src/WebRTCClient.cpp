@@ -482,11 +482,11 @@ WebRTCClient::OnCandidate(
  * @brief Handles a file-offer event.
  *
  * The current implementation initializes a peer connection with the
- * configured STUN server and gathers an initial local description. It does
- * not yet read the offer document or apply remote descriptions/candidates.
+ * configured STUN server, reads the remote peer identifier, and applies the
+ * offered remote description and ICE candidates.
  *
  * @param doc JSON payload containing the offered file metadata and signaling
- *            data; currently unused by this implementation.
+ *            data.
  */
 void
 WebRTCClient::OnFileOffer(
@@ -512,12 +512,12 @@ WebRTCClient::OnFileOffer(
 
     m_pc = std::make_shared<rtc::PeerConnection>(config);
 
-    if (!doc.HasMember("from") || !doc["from"].IsString()) {
-        Logger::warn() << "FileOffer with no from field.";
+    if (!doc.HasMember("peer") || !doc["peer"].IsString()) {
+        Logger::warn() << "FileOffer with no peer field.";
         return;
     }
 
-    std::string from = doc["from"].GetString();
+    std::string from = doc["peer"].GetString();
     m_pc->onDataChannel([this, from](std::shared_ptr<rtc::DataChannel> dc) {
         {
             std::lock_guard<std::mutex> lock(m_clientStateMutex);
