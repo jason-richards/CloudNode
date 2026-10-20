@@ -410,8 +410,8 @@ WebRTCClient::OnFileAccept(
 ) {
     Logger::info() << "FileAccept";
 
-    const std::string peer = doc.HasMember("from") && doc["from"].IsString()
-        ? doc["from"].GetString() : m_peer;
+    const std::string peer = doc.HasMember("peer") && doc["peer"].IsString()
+        ? doc["peer"].GetString() : m_peer;
     const std::string room = doc.HasMember("room") && doc["room"].IsString()
         ? doc["room"].GetString() : m_room;
     if (peer != m_peer || room != m_room) {
@@ -453,8 +453,8 @@ WebRTCClient::OnAnswer(
 ) {
     Logger::info() << "OnAnswer.";
 
-    const std::string peer = doc.HasMember("from") && doc["from"].IsString()
-        ? doc["from"].GetString()
+    const std::string peer = doc.HasMember("peer") && doc["peer"].IsString()
+        ? doc["peer"].GetString()
         : (doc.HasMember("peer") && doc["peer"].IsString() ? doc["peer"].GetString() : m_peer);
     const std::string room = doc.HasMember("room") && doc["room"].IsString()
         ? doc["room"].GetString() : m_room;
@@ -485,8 +485,8 @@ void
 WebRTCClient::OnFileReject(
     rapidjson::Document& doc
 ) {
-    const std::string peer = doc.HasMember("from") && doc["from"].IsString()
-        ? doc["from"].GetString() : m_peer;
+    const std::string peer = doc.HasMember("peer") && doc["peer"].IsString()
+        ? doc["peer"].GetString() : m_peer;
     const std::string room = doc.HasMember("room") && doc["room"].IsString()
         ? doc["room"].GetString() : m_room;
     if (peer != m_peer || room != m_room) {
@@ -529,8 +529,8 @@ WebRTCClient::OnCandidate(
 ) {
     Logger::info() << "OnCandidate";
 
-    const std::string peer = doc.HasMember("from") && doc["from"].IsString()
-        ? doc["from"].GetString()
+    const std::string peer = doc.HasMember("peer") && doc["peer"].IsString()
+        ? doc["peer"].GetString()
         : (doc.HasMember("peer") && doc["peer"].IsString() ? doc["peer"].GetString() : m_peer);
     const std::string room = doc.HasMember("room") && doc["room"].IsString()
         ? doc["room"].GetString() : m_room;
@@ -566,17 +566,17 @@ WebRTCClient::OnOffer(
 ) {
     Logger::info() << "OnOffer";
 
-    if (!doc.HasMember("from") || !doc["from"].IsString() ||
+    if (!doc.HasMember("peer") || !doc["peer"].IsString() ||
         !doc.HasMember("room") || !doc["room"].IsString()) {
         Logger::warn() << "FileOffer is missing its sender or room.";
         return;
     }
 
-    const std::string from = doc["from"].GetString();
+    const std::string peer = doc["peer"].GetString();
     const std::string room = doc["room"].GetString();
-    PeerRoomKey key{from, room};
+    PeerRoomKey key{peer, room};
     DataChannel dataChannel;
-    dataChannel.pc = MakePeerConnection(from, room);
+    dataChannel.pc = MakePeerConnection(peer, room);
     dataChannel.fileQ = CreateStringQueue();
     auto peerConnection = dataChannel.pc;
     {
@@ -584,7 +584,7 @@ WebRTCClient::OnOffer(
         m_dataChannels.insert_or_assign(key, dataChannel);
     }
 
-    peerConnection->onDataChannel([this, key, from, weakPeerConnection = rtc::weak_ptr(peerConnection)](std::shared_ptr<rtc::DataChannel> dc) {
+    peerConnection->onDataChannel([this, key, peer, weakPeerConnection = rtc::weak_ptr(peerConnection)](std::shared_ptr<rtc::DataChannel> dc) {
         {
             std::lock_guard<std::mutex> lock(m_dataChannelsMutex);
             auto it = m_dataChannels.find(key);
@@ -615,24 +615,24 @@ WebRTCClient::OnOffer(
 
         });
 
-        dc->onClosed([from]() {
+        dc->onClosed([peer]() {
             Logger::info()
-                << "onClosed: DataChannel from \""
-                << from
+                << "onClosed: DataChannel peer \""
+                << peer
                 << "\" closed";
         });
 
-        dc->onMessage([from](auto data) {
+        dc->onMessage([peer](auto data) {
             if (std::holds_alternative<std::string>(data)) {
                 Logger::info()
-                    << "onMessage:  Textual message from \""
-                    << from 
+                    << "onMessage:  Textual message peer \""
+                    << peer
                     << "\" received: "
                     << std::get<std::string>(data);
             } else {
                 Logger::info()
-                    << "onMessage: Binary message from \""
-                    << from
+                    << "onMessage: Binary message peer \""
+                    << peer
                     << "\" received, size="
                     << std::get<rtc::binary>(data).size();
             }
@@ -640,11 +640,11 @@ WebRTCClient::OnOffer(
     });
 
     // 2. Set up local candidate callback (trickle ICE)
-    peerConnection->onLocalCandidate([this, from, room](rtc::Candidate candidate) {
+    peerConnection->onLocalCandidate([this, peer, room](rtc::Candidate candidate) {
         std::ostringstream payload;
         payload << "{ \"type\" : \"candidate\", "
                 << "\"peer\" : \""
-                << from
+                << peer
                 << "\", \"room\" : \""
                 << room
                 << "\", \"candidate\" : \""
@@ -659,7 +659,7 @@ WebRTCClient::OnOffer(
     });
 
     // 3. Set up local description callback (sends the generated offer)
-    peerConnection->onLocalDescription([this, from, room](rtc::Description description) {
+    peerConnection->onLocalDescription([this, peer, room](rtc::Description description) {
         std::string b64desc;
         if (!base64Encode(std::string(description), b64desc)) {
             Logger::error() << "Encountered error base64 encoding description payload.";
@@ -670,7 +670,7 @@ WebRTCClient::OnOffer(
         payload << "{ \"type\" : \""
                 << std::string(description.typeString())
                 << "\", \"peer\" : \""
-                << from
+                << peer
                 << "\", \"room\" : \""
                 << room
                 << "\", \"sdp\" : \""
@@ -719,14 +719,14 @@ void
 WebRTCClient::OnFileComplete(
     rapidjson::Document& doc
 ) {
-    if (!doc.HasMember("from") || !doc["from"].IsString() ||
+    if (!doc.HasMember("peer") || !doc["peer"].IsString() ||
         !doc.HasMember("room") || !doc["room"].IsString()) {
         Logger::warn() << "File completion is missing its sender or room.";
         return;
     }
 
     Logger::info()
-        << "File transfer to '" << doc["from"].GetString()
+        << "File transfer to '" << doc["peer"].GetString()
         << "' in room '" << doc["room"].GetString() << "' completed.";
 }
 
@@ -764,7 +764,7 @@ void
 WebRTCClient::OnFileOffer(
     rapidjson::Document& doc
 ) {
-    if (!doc.HasMember("from") || !doc["from"].IsString() ||
+    if (!doc.HasMember("peer") || !doc["peer"].IsString() ||
         !doc.HasMember("room") || !doc["room"].IsString() ||
         !doc.HasMember("file") || !doc["file"].IsObject()) {
         Logger::warn() << "FileOffer is missing its sender, room, or file metadata.";
@@ -780,14 +780,14 @@ WebRTCClient::OnFileOffer(
     }
 
     Logger::info()
-        << "Received file offer from '" << doc["from"].GetString()
+        << "Received file offer peer '" << doc["peer"].GetString()
         << "' in room '" << doc["room"].GetString()
         << "': " << file["name"].GetString()
         << " (" << file["size"].GetInt64() << " bytes, "
         << file["mimeType"].GetString() << ").";
 
     std::string room = doc["room"].GetString();
-    std::string peer = doc["from"].GetString();
+    std::string peer = doc["peer"].GetString();
 
     SendFileAccept(doc);
 }
@@ -796,15 +796,15 @@ void
 WebRTCClient::SendFileAccept(
     rapidjson::Document& doc
 ) {
-    if (!doc.HasMember("from") || !doc["from"].IsString()) {
+    if (!doc.HasMember("peer") || !doc["peer"].IsString()) {
         Logger::warn() << "Cannot accept a file offer without a sender.";
         return;
     }
 
-    const std::string peer = doc["from"].GetString();
+    const std::string peer = doc["peer"].GetString();
     auto& allocator = doc.GetAllocator();
     doc["type"].SetString("file_accept", allocator);
-    doc.EraseMember("from");
+    doc.EraseMember("peer");
     doc.EraseMember("peer");
     doc.AddMember(
         rapidjson::Value("peer", allocator),

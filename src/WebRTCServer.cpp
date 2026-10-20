@@ -172,10 +172,9 @@ WebRTCServer::HandleFile(
         return false;
     }
 
-    doc.EraseMember("peer");
-    doc.AddMember(
-        rapidjson::Value("from", doc.GetAllocator()),
-        rapidjson::Value(fromId.c_str(), doc.GetAllocator()),
+    doc["peer"].SetString(
+        fromId.c_str(),
+        static_cast<rapidjson::SizeType>(fromId.size()),
         doc.GetAllocator()
     );
 
@@ -279,10 +278,9 @@ WebRTCServer::OnFileComplete(
         return;
     }
 
-    doc.EraseMember("peer");
-    doc.AddMember(
-        rapidjson::Value("from", doc.GetAllocator()),
-        rapidjson::Value(from.c_str(), doc.GetAllocator()),
+    doc["peer"].SetString(
+        from.c_str(),
+        static_cast<rapidjson::SizeType>(from.size()),
         doc.GetAllocator()
     );
 
@@ -332,10 +330,9 @@ WebRTCServer::OnOffer(
         return;
     }
 
-    doc.EraseMember("peer");
-    doc.AddMember(
-        rapidjson::Value("from", doc.GetAllocator()),
-        rapidjson::Value(from.c_str(), doc.GetAllocator()),
+    doc["peer"].SetString(
+        from.c_str(),
+        static_cast<rapidjson::SizeType>(from.size()),
         doc.GetAllocator()
     );
 
@@ -375,10 +372,9 @@ WebRTCServer::OnAnswer(
     }
     const std::string from = source->getUserData()->x_client_id;
 
-    doc.EraseMember("peer");
-    doc.AddMember(
-        rapidjson::Value("from", doc.GetAllocator()),
-        rapidjson::Value(from.c_str(), doc.GetAllocator()),
+    doc["peer"].SetString(
+        from.c_str(),
+        static_cast<rapidjson::SizeType>(from.size()),
         doc.GetAllocator()
     );
 
@@ -419,10 +415,9 @@ WebRTCServer::OnCandidate(
     }
     const std::string from = source->getUserData()->x_client_id;
 
-    doc.EraseMember("peer");
-    doc.AddMember(
-        rapidjson::Value("from", doc.GetAllocator()),
-        rapidjson::Value(from.c_str(), doc.GetAllocator()),
+    doc["peer"].SetString(
+        from.c_str(),
+        static_cast<rapidjson::SizeType>(from.size()),
         doc.GetAllocator()
     );
     
