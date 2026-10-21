@@ -141,7 +141,8 @@ public:
     inline bool
     get_file_info (
         const std::string& filename,
-        std::string & info
+        std::string & info,
+        const std::string& displayName = ""
     ) {
         try {
             info = get_mime_type(filename);
@@ -152,7 +153,7 @@ public:
             // Construct JSON string
             info = 
                 "{\"name\": \""
-                + filename 
+                + (displayName.empty() ? filename : displayName)
                 + "\", \"size\": "
                 + std::to_string(size)
                 + ", \"mimeType\": \""

@@ -5,6 +5,8 @@
 #include "LocalDescription.hpp"
 #include "Queue.hpp"
 #include <condition_variable>
+#include <cstdint>
+#include <fstream>
 #include <map>
 #include <mutex>
 #include <utility>
@@ -107,6 +109,11 @@ public:
 
     void
     SendFileAccept(
+        rapidjson::Document& doc
+    );
+
+    void
+    SendFileReject(
         rapidjson::Document& doc
     );
 
@@ -302,6 +309,17 @@ private:
     using PeerRoomKey = std::pair<std::string, std::string>;
     mutable std::mutex m_dataChannelsMutex;
     std::map<PeerRoomKey, DataChannel> m_dataChannels;
+
+    /** @brief Guards m_incomingFiles and writes to the open files. */
+    std::mutex m_incomingMutex;
+
+    struct IncomingFile {
+        std::ofstream stream;
+        std::int64_t expectedSize{0};
+    };
+
+    /** @brief Files currently being received, keyed by sender and room. */
+    std::map<PeerRoomKey, IncomingFile> m_incomingFiles;
 };
 
 #endif // WEBRTC_CLIENT_HPP

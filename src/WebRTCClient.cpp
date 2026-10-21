@@ -253,7 +253,23 @@ WebRTCClient::SendFileOffer(
     MimeDetector md;
     std::string fdsc;
 
-    if (!md.get_file_info(fileDetails, fdsc)) {
+    std::string offeredPath;
+    try {
+        const auto absolutePath = fs::absolute(fileDetails).lexically_normal();
+        const auto directory = Properties().Contains("directory")
+            ? Properties().Get<std::string>("directory") : std::string();
+        if (directory.empty()) {
+            offeredPath = absolutePath.string();
+        } else {
+            offeredPath = absolutePath.lexically_relative(
+                fs::absolute(directory).lexically_normal()).string();
+        }
+    } catch (const std::exception& e) {
+        Logger::error() << "Unable to resolve file path: " << e.what();
+        return;
+    }
+
+    if (!md.get_file_info(fileDetails, fdsc, offeredPath)) {
         Logger::error()
             << "Error: "
             << fdsc;
@@ -633,7 +649,7 @@ WebRTCClient::OnOffer(
                 << "\" closed";
         });
 
-        dc->onMessage([peer](auto data) {
+        dc->onMessage([this, key, peer](auto data) {
             if (std::holds_alternative<std::string>(data)) {
                 Logger::info()
                     << "onMessage:  Textual message peer \""
@@ -641,11 +657,44 @@ WebRTCClient::OnOffer(
                     << "\" received: "
                     << std::get<std::string>(data);
             } else {
+                const auto& bytes = std::get<rtc::binary>(data);
                 Logger::info()
                     << "onMessage: Binary message peer \""
                     << peer
                     << "\" received, size="
-                    << std::get<rtc::binary>(data).size();
+                    << bytes.size();
+
+                bool transferComplete = false;
+                {
+                    std::lock_guard<std::mutex> lock(m_incomingMutex);
+                    auto it = m_incomingFiles.find(key);
+                    if (it != m_incomingFiles.end() && it->second.stream.is_open()) {
+                        auto& file = it->second;
+                        file.stream.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+                        file.stream.flush();
+                        const auto bytesWritten = file.stream.tellp();
+                        if (!file.stream || bytesWritten == std::streampos(-1)) {
+                            Logger::error() << "Failed writing incoming file for peer '" << peer << "'.";
+                            file.stream.close();
+                            m_incomingFiles.erase(it);
+                        } else if (bytesWritten == file.expectedSize) {
+                            file.stream.close();
+                            m_incomingFiles.erase(it);
+                            transferComplete = true;
+                        } else if (bytesWritten > file.expectedSize) {
+                            Logger::error() << "Incoming file exceeded its offered size for peer '" << peer << "'.";
+                            file.stream.close();
+                            m_incomingFiles.erase(it);
+                        }
+                    }
+                }
+                if (transferComplete) {
+                    {
+                        std::lock_guard<std::mutex> lock(m_clientStateMutex);
+                        m_clientState = ClientState::CLIENT_RUN;
+                    }
+                    m_clientStateChanged.notify_all();
+                }
             }
         });
     });
@@ -739,6 +788,7 @@ WebRTCClient::OnFileComplete(
     Logger::info()
         << "File transfer to '" << doc["peer"].GetString()
         << "' in room '" << doc["room"].GetString() << "' completed.";
+
 }
 
 
@@ -800,6 +850,56 @@ WebRTCClient::OnFileOffer(
     std::string room = doc["room"].GetString();
     std::string peer = doc["peer"].GetString();
 
+    // The sender's name is untrusted; confine it beneath our own directory.
+    const auto directory = Properties().Contains("directory")
+        ? Properties().Get<std::string>("directory") : std::string();
+    fs::path destination;
+    try {
+        const fs::path name = fs::path(file["name"].GetString()).relative_path().lexically_normal();
+        if (name.empty() || *name.begin() == "..") {
+            Logger::warn() << "FileOffer name escapes the destination directory.";
+            return;
+        }
+        destination = fs::path(directory.empty() ? "." : directory) / name;
+        if (destination.has_parent_path()) {
+            fs::create_directories(destination.parent_path());
+        }
+    } catch (const std::exception& e) {
+        Logger::error() << "Unable to prepare destination: " << e.what();
+        return;
+    }
+
+    if (file.HasMember("crc") && file["crc"].IsUint64()) {
+        std::error_code ec;
+        if (fs::is_regular_file(destination, ec)) {
+            try {
+                MimeDetector md;
+                if (md.get_crc(destination.string()) == file["crc"].GetUint64()) {
+                    Logger::info() << "File already present with matching CRC; rejecting: " << destination.string();
+                    SendFileReject(doc);
+                    return;
+                }
+            } catch (const std::exception& e) {
+                Logger::warn() << "Unable to compute CRC of existing file: " << e.what();
+            }
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(m_incomingMutex);
+        auto& incomingFile = m_incomingFiles[{peer, room}];
+        incomingFile.stream.close();
+        incomingFile.stream.clear();
+        incomingFile.expectedSize = file["size"].GetInt64();
+        incomingFile.stream.open(destination, std::ios::binary | std::ios::trunc);
+        if (!incomingFile.stream) {
+            Logger::error() << "Unable to open destination file: " << destination.string();
+            m_incomingFiles.erase({peer, room});
+            return;
+        }
+    }
+    Logger::info() << "Receiving file into: " << destination.string();
+
     SendFileAccept(doc);
 }
 
@@ -828,6 +928,33 @@ WebRTCClient::SendFileAccept(
     doc.Accept(writer);
     if (!SendMessage(buffer.GetString())) {
         Logger::error() << "Unable to send file_accept command.";
+    }
+}
+
+void
+WebRTCClient::SendFileReject(
+    rapidjson::Document& doc
+) {
+    if (!doc.HasMember("peer") || !doc["peer"].IsString()) {
+        Logger::warn() << "Cannot reject a file offer without a sender.";
+        return;
+    }
+
+    const std::string peer = doc["peer"].GetString();
+    auto& allocator = doc.GetAllocator();
+    doc["type"].SetString("file_reject", allocator);
+    doc.EraseMember("peer");
+    doc.AddMember(
+        rapidjson::Value("peer", allocator),
+        rapidjson::Value(peer.c_str(), allocator),
+        allocator
+    );
+
+    rapidjson::StringBuffer buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    doc.Accept(writer);
+    if (!SendMessage(buffer.GetString())) {
+        Logger::error() << "Unable to send file_reject command.";
     }
 }
 
