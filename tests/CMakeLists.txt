@@ -28,3 +28,11 @@ add_test(
         $<TARGET_FILE:CloudNode>
 )
 set_tests_properties(CloudNodeThreeProcessFileTransfer PROPERTIES TIMEOUT 90)
+
+add_test(
+    NAME CloudNodeQueuedFileTransfer
+    COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/queued_file_transfer.py
+        $<TARGET_FILE:CloudNode>
+)
+set_tests_properties(CloudNodeQueuedFileTransfer PROPERTIES TIMEOUT 180)
