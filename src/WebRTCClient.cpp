@@ -1009,12 +1009,24 @@ WebRTCClient::OnMessageClose(
     (void) code;
     (void) message;
     Logger::info() << "MessagePort Closed.";
+    bool reconnecting = false;
     {
         std::lock_guard<std::mutex> lock(m_clientStateMutex);
-        m_clientState = ClientState::CLIENT_EXIT;
+        if (m_clientState != ClientState::CLIENT_EXIT) {
+            // The transport reconnects on its own; restart the session once it reopens.
+            m_clientState = ClientState::CLIENT_INIT;
+            m_transportOpen = false;
+            reconnecting = true;
+        }
     }
     m_clientStateChanged.notify_all();
     WakeFileTransferWorkers();
+    if (reconnecting) {
+        Logger::info() << "Connection lost; waiting for the server to return.";
+        std::lock_guard<std::mutex> lock(m_dataChannelsMutex);
+        m_dataChannels.clear();
+        m_incomingChannels.clear();
+    }
 }
 
 
@@ -1097,13 +1109,9 @@ WebRTCClient::StartClient() {
 
     while (m_clientState != ClientState::CLIENT_EXIT) {
         if (m_clientState == ClientState::CLIENT_INIT) {
-            if (!m_clientStateChanged.wait_for(lock, timeout, [this]() {
+            m_clientStateChanged.wait(lock, [this]() {
                 return m_transportOpen || m_clientState == ClientState::CLIENT_EXIT;
-            })) {
-                Logger::warn() << "Timed out waiting for the message transport to open.";
-                m_clientState = ClientState::CLIENT_EXIT;
-                continue;
-            }
+            });
             if (m_clientState == ClientState::CLIENT_EXIT) {
                 continue;
             }
@@ -1141,17 +1149,20 @@ WebRTCClient::StartClient() {
                 }
                 if (!m_clientStateChanged.wait_for(lock, timeout, [this]() {
                     return m_clientState == ClientState::CLIENT_JOINED ||
+                           m_clientState == ClientState::CLIENT_INIT ||
                            m_clientState == ClientState::CLIENT_EXIT;
                 })) {
                     Logger::warn() << "Timed out waiting for \"join\" to complete.";
                     m_clientState = ClientState::CLIENT_EXIT;
                     break;
                 }
-                if (m_clientState == ClientState::CLIENT_EXIT) {
+                if (m_clientState == ClientState::CLIENT_EXIT ||
+                    m_clientState == ClientState::CLIENT_INIT) {
                     break;
                 }
             }
-            if (m_clientState == ClientState::CLIENT_EXIT) {
+            if (m_clientState == ClientState::CLIENT_EXIT ||
+                m_clientState == ClientState::CLIENT_INIT) {
                 continue;
             }
 
@@ -1163,13 +1174,15 @@ WebRTCClient::StartClient() {
                     return std::find(peers.begin(), peers.end(), spec.peer) != peers.end();
                 };
                 if (!m_clientStateChanged.wait_for(lock, timeout, [&]() {
-                    return m_clientState == ClientState::CLIENT_EXIT || peerPresent();
+                    return m_clientState == ClientState::CLIENT_EXIT ||
+                           m_clientState == ClientState::CLIENT_INIT || peerPresent();
                 })) {
                     Logger::warn() << "Timed out waiting for peer '" << spec.peer
                                    << "' to join room '" << spec.room << "'.";
                     m_clientState = ClientState::CLIENT_EXIT;
                 }
-                if (m_clientState == ClientState::CLIENT_EXIT) {
+                if (m_clientState == ClientState::CLIENT_EXIT ||
+                    m_clientState == ClientState::CLIENT_INIT) {
                     break;
                 }
 
@@ -1184,14 +1197,17 @@ WebRTCClient::StartClient() {
                     SendFileOffer(spec.room, spec.peer, spec.path);
                 }
                 lock.lock();
-                if (!ready && m_clientState != ClientState::CLIENT_EXIT) {
+                if (!ready && m_clientState != ClientState::CLIENT_EXIT &&
+                    m_clientState != ClientState::CLIENT_INIT) {
                     m_clientState = ClientState::CLIENT_EXIT;
                 }
-                if (m_clientState == ClientState::CLIENT_EXIT) {
+                if (m_clientState == ClientState::CLIENT_EXIT ||
+                    m_clientState == ClientState::CLIENT_INIT) {
                     break;
                 }
             }
-            if (m_clientState == ClientState::CLIENT_EXIT) {
+            if (m_clientState == ClientState::CLIENT_EXIT ||
+                m_clientState == ClientState::CLIENT_INIT) {
                 continue;
             }
 

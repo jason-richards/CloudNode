@@ -62,6 +62,11 @@ bool MessagePortServer::Start(const std::string& address, int port) {
                     }
                 },
                 .close = [this](auto* ws, int code, std::string_view message) {
+                    PerSocketData *peerData = (PerSocketData *) ws->getUserData();
+                    auto it = clients.find(peerData->x_client_id);
+                    if (it != clients.end() && it->second == ws) {
+                        clients.erase(it);
+                    }
                     // Execute close callback if set
                     if (m_closeCallback) {
                         m_closeCallback(ws, code, message);
@@ -121,6 +126,12 @@ void MessagePortServer::Stop() {
     if (loop && listenSocket) {
         loop->defer([this, listenSocket]() {
             us_listen_socket_close(0, listenSocket);
+            // Copy first: closing a socket erases it from 'clients'.
+            auto connected = clients;
+            for (auto& [id, ws] : connected) {
+                (void) id;
+                ws->end(1001, "Server shutting down");
+            }
             {
                 std::lock_guard<std::mutex> lock(m_mtx);
                 // Only clear the socket if it was the one we were tracking
