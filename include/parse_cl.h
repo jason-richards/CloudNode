@@ -2,8 +2,8 @@
 **
 ** parse_cl.h
 **
-** Sat Oct 10 20:58:12 2026
-** Linux 6.8.0-51-generic (#52-Ubuntu SMP PREEMPT_DYNAMIC Thu Dec  5 13:09:44 UTC 2024) x86_64
+** Wed Oct 21 10:49:13 2026
+** Linux 6.8.0-147-generic (#147-Ubuntu SMP PREEMPT_DYNAMIC Thu Sep 24 11:33:16 UTC 2026) x86_64
 ** jrichard@SpinRun42 (Jason Richards)
 **
 ** Header file for command line parser class
@@ -40,7 +40,6 @@ private:
   std::string _stunAddress;
   int _stunPort;
   std::string _name;
-  std::string _peer;
   std::string _directory;
   std::string _room;
   std::string _file;
@@ -70,7 +69,6 @@ public:
   std::string stunAddress () const { return _stunAddress; }
   int stunPort () const { return _stunPort; }
   std::string name () const { return _name; }
-  std::string peer () const { return _peer; }
   std::string directory () const { return _directory; }
   std::string room () const { return _room; }
   std::string file () const { return _file; }

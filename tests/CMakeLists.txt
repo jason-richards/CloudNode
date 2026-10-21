@@ -36,3 +36,11 @@ add_test(
         $<TARGET_FILE:CloudNode>
 )
 set_tests_properties(CloudNodeQueuedFileTransfer PROPERTIES TIMEOUT 180)
+
+add_test(
+    NAME CloudNodeStaggeredFileTransfer
+    COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/staggered_file_transfer.py
+        $<TARGET_FILE:CloudNode>
+)
+set_tests_properties(CloudNodeStaggeredFileTransfer PROPERTIES TIMEOUT 180)

@@ -106,7 +106,7 @@ def main():
 
             client_b, client_b_log = launch(
                 "client-b",
-                ["--room", "integration-room", "--peer", "client-a", "--file", str(source_file)],
+                ["--file", f"client-a:integration-room:{source_file}"],
             )
 
             def transfer_observed(content):

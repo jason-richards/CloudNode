@@ -2,8 +2,8 @@
 **
 ** parse_cl.cpp
 **
-** Sat Oct 10 20:58:12 2026
-** Linux 6.8.0-51-generic (#52-Ubuntu SMP PREEMPT_DYNAMIC Thu Dec  5 13:09:44 UTC 2024) x86_64
+** Wed Oct 21 10:49:13 2026
+** Linux 6.8.0-147-generic (#147-Ubuntu SMP PREEMPT_DYNAMIC Thu Sep 24 11:33:16 UTC 2026) x86_64
 ** jrichard@SpinRun42 (Jason Richards)
 **
 ** Definition of command line parser class
@@ -42,7 +42,6 @@ Cmdline::Cmdline (int argc, char *argv[])
     {"stunAddress", required_argument, NULL, 258},
     {"stunPort", required_argument, NULL, 259},
     {"name", required_argument, NULL, 'n'},
-    {"peer", required_argument, NULL, 'p'},
     {"directory", required_argument, NULL, 'd'},
     {"room", required_argument, NULL, 'r'},
     {"file", required_argument, NULL, 'f'},
@@ -66,7 +65,7 @@ Cmdline::Cmdline (int argc, char *argv[])
   _version = false;
 
   optind = 0;
-  while ((c = getopt_long (argc, argv, "st:m:n:p:d:r:f:hv", long_options, &optind)) != - 1)
+  while ((c = getopt_long (argc, argv, "st:m:n:d:r:f:hv", long_options, &optind)) != - 1)
     {
       switch (c)
         {
@@ -100,10 +99,6 @@ Cmdline::Cmdline (int argc, char *argv[])
 
         case 'n': 
           _name = optarg;
-          break;
-
-        case 'p': 
-          _peer = optarg;
           break;
 
         case 'd': 
@@ -169,14 +164,12 @@ WebRTC file transfer client/server.\n\
           STUN server port\n\
    [ -n ] [ --name ] (type=STRING)\n\
           client name\n\
-   [ -p ] [ --peer ] (type=STRING)\n\
-          peer name\n\
    [ -d ] [ --directory ] (type=STRING)\n\
           directory containing files\n\
    [ -r ] [ --room ] (type=STRING, default=DefaultRoom#1)\n\
           message room name\n\
    [ -f ] [ --file ] (type=STRING)\n\
-          file to transfer\n\
+          files to send as comma-separated peer:room:path entries\n\
    [ -h ] [ --help ] (type=FLAG)\n\
           Display this help and exit.\n\
    [ -v ] [ --version ] (type=FLAG)\n\

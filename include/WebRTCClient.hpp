@@ -312,19 +312,9 @@ private:
     bool m_transportOpen{false};
 
     /**
-     * @brief Room currently joined by the client.
+     * @brief Room most recently joined by the client.
      */
     std::string m_room;
-
-    /**
-     * @brief Current peer the client is interacting with.
-     */
-    std::string m_peer;
-
-    /**
-     * @brief Current file target associated with the client workflow.
-     */
-    std::string m_file;
 
     std::mutex m_pendingMutex;
     std::map<std::string, PendingOffer> m_pendingOffers;

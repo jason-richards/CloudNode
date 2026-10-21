@@ -110,8 +110,7 @@ def main():
             # Client 1 offers a file to a peer that is not online yet.
             client1, log1 = launch(
                 "client-1",
-                ["--room", ROOM, "--peer", "client-2", "--directory", str(dir1),
-                 "--file", str(dir1 / name1_file)],
+                ["--directory", str(dir1), "--file", f"client-2:{ROOM}:{dir1 / name1_file}"],
             )
             wait_for(
                 lambda: "has joined room" in read(server_log),
@@ -129,8 +128,7 @@ def main():
 
             client2, log2 = launch(
                 "client-2",
-                ["--room", ROOM, "--peer", "client-1", "--directory", str(dir2),
-                 "--file", str(dir2 / name2_file)],
+                ["--directory", str(dir2), "--file", f"client-1:{ROOM}:{dir2 / name2_file}"],
             )
             all_procs = [server, client1, client2]
             join_deadline_start = time.monotonic()

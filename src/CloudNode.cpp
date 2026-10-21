@@ -68,7 +68,6 @@ main(
     properties.Set("server",            params.server());
     properties.Set("directory",         params.directory());
     properties.Set("room",              params.room());
-    properties.Set("peer",              params.peer());
     properties.Set("file",              params.file());
     properties.Set("help",              params.help());
     properties.Set("version",           params.version());
