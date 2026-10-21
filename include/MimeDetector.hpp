@@ -7,6 +7,8 @@
 #include <iomanip>
 #include <iostream>
 #include <filesystem>
+#include <cstdint>
+#include <stdexcept>
 
 namespace fs = std::filesystem;
 
@@ -95,7 +97,36 @@ public:
     }
 
     /**
-     * @brief Returns a JSON object with the file name, size, and MIME type.
+     * @brief Computes the standard CRC-32 (IEEE 802.3) of a file, streaming its contents.
+     * @throws std::runtime_error if the file cannot be opened.
+     */
+    inline std::uint32_t get_crc(const std::string& filename) {
+        std::ifstream file(filename, std::ios::binary);
+        if (!file) {
+            throw std::runtime_error("Failed to open file: " + filename);
+        }
+
+        std::uint32_t table[256];
+        for (std::uint32_t i = 0; i < 256; ++i) {
+            std::uint32_t c = i;
+            for (int k = 0; k < 8; ++k) {
+                c = (c & 1) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
+            }
+            table[i] = c;
+        }
+
+        std::uint32_t crc = 0xFFFFFFFFu;
+        char buf[65536];
+        while (file.read(buf, sizeof(buf)) || file.gcount() > 0) {
+            for (std::streamsize i = 0; i < file.gcount(); ++i) {
+                crc = table[(crc ^ static_cast<unsigned char>(buf[i])) & 0xFF] ^ (crc >> 8);
+            }
+        }
+        return crc ^ 0xFFFFFFFFu;
+    }
+
+    /**
+     * @brief Returns a JSON object with the file name, size, MIME type, and CRC.
      *
      * This helper is used to build file-offer payloads sent to the signalling
      * server. It calls `get_mime_type()` to detect the file content type,
@@ -116,6 +147,7 @@ public:
             info = get_mime_type(filename);
 
             std::uintmax_t size = fs::file_size(filename);
+            std::uint32_t crc = get_crc(filename);
 
             // Construct JSON string
             info = 
@@ -125,7 +157,9 @@ public:
                 + std::to_string(size)
                 + ", \"mimeType\": \""
                 + info
-                + "\"}";
+                + "\", \"crc\": "
+                + std::to_string(crc)
+                + "}";
             return true;
         } catch (const std::exception& e) {
             // Return a JSON error response if any exception occurs
