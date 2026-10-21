@@ -14,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <mutex>
 
 /**
  * @file WebRTC.hpp
@@ -95,6 +96,19 @@ public:
     GetPeers(
         const std::string& room,
         std::vector<std::string>& peers
+    );
+
+
+    /**
+     * @brief Replaces peer identifiers currently present in a room.
+     *
+     * @param room Room name being queried.
+     * @param peers Input vector that receives the peer names in that room.
+     */
+    void
+    UpdatePeers(
+        const std::string& room,
+        std::set<std::string>& peerList
     );
 
 
@@ -317,6 +331,11 @@ private:
      * @brief Pointer to the active websocket used by the message port.
      */
     MessagePort::Ws* m_currentWebSocket{nullptr};
+
+    /**
+     * @brief Synchronizes state transitions in the room state lifecycle.
+     */
+    std::mutex m_roomMutex;
 };
 
 #endif // WEBRTC_HPP

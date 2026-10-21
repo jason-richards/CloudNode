@@ -40,9 +40,11 @@ WebRTCServer::SendJoinNotification(
     }
 
     Logger::info() << "Notifying \'" << whoToNotify << "\' that \'" << whoJoined << "\' joined.";
+
     rapidjson::Document doc;
     doc.SetObject();
     auto& allocator = doc.GetAllocator();
+
     doc.AddMember("type", "peer_joined", allocator);
     doc.AddMember("peerId", rapidjson::Value(whoJoined.c_str(), allocator), allocator);
     doc.AddMember("room", rapidjson::Value(room.c_str(), allocator), allocator);
@@ -98,16 +100,35 @@ void
 WebRTCServer::SendLeaveNotification(
     const std::string& whoToNotify,
     const std::string& whoLeft,
-    const std::string& room
+    const std::string& room,
+    const std::set<std::string>& peers
 ) {
-        auto ws = m_clientDB.find(whoToNotify);
-        if (ws == m_clientDB.end()) {
-        Logger::warn() << "User: " + whoToNotify + " not found.";
+    auto ws = m_clientDB.find(whoToNotify);
+    if (ws == m_clientDB.end()) {
+        Logger::error() << "User: " + whoToNotify + " not found.";
         return;
     }
 
     Logger::info() << "Notifying \'" << whoToNotify << "\' that \'" << whoLeft << "\' left.";
-    ws->second->send("{\"type\" : \"peer_left\", \"peerId\" : \"" + whoLeft + "\", \"room\" : \"" + room + "\" }");
+
+    rapidjson::Document doc;
+    doc.SetObject();
+    auto& allocator = doc.GetAllocator();
+
+    doc.AddMember("type", "peer_left", allocator);
+    doc.AddMember("peerId", rapidjson::Value(whoLeft.c_str(), allocator), allocator);
+    doc.AddMember("room", rapidjson::Value(room.c_str(), allocator), allocator);
+
+    rapidjson::Value peerList(rapidjson::kArrayType);
+    for (const auto& peer : peers) {
+        peerList.PushBack(rapidjson::Value(peer.c_str(), allocator), allocator);
+    }
+    doc.AddMember("peers", std::move(peerList), allocator);
+
+    rapidjson::StringBuffer buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    doc.Accept(writer);
+    ws->second->send(buffer.GetString());
 }
 
 
@@ -119,7 +140,7 @@ WebRTCServer::Leave(
 ) {
     WebRTC::Leave(peer, room);
      for (auto u : m_rooms[room]) {
-        SendLeaveNotification(u, peer, room);
+        SendLeaveNotification(u, peer, room, m_rooms[room]);
     }
 }
 

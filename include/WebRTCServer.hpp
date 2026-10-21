@@ -143,7 +143,12 @@ private:
      * @param whoLeft Peer that departed the room.
      * @param room Room affected by the change.
      */
-    void SendLeaveNotification(const std::string& whoToNotify, const std::string& whoLeft, const std::string& room);
+    void SendLeaveNotification(
+        const std::string& whoToNotify,
+        const std::string& whoLeft,
+        const std::string& room,
+        const std::set<std::string>& peers
+    );
 
     /**
      * @brief Removes a peer from a room using the server's room-tracking tables.

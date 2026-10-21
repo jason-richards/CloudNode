@@ -370,7 +370,8 @@ WebRTCClient::OnJoin(
         }
         peers.insert(peerValue.GetString());
     }
-    m_rooms[room] = std::move(peers);
+
+    WebRTC::UpdatePeers(room, peers);
 
     std::lock_guard<std::mutex> lock(m_clientStateMutex);
     if (m_clientState == ClientState::CLIENT_WAITING_FOR_JOIN &&
@@ -400,6 +401,16 @@ WebRTCClient::OnLeave(
     std::string peer = doc["peerId"].GetString();
 
     WebRTC::Leave(peer, room);
+    std::set<std::string> peers;
+    for (const auto& peerValue : doc["peers"].GetArray()) {
+        if (!peerValue.IsString()) {
+            Logger::warn() << "Join command contains an invalid peer identifier.";
+            return;
+        }
+        peers.insert(peerValue.GetString());
+    }
+
+    WebRTC::UpdatePeers(room, peers);
 }
 
 

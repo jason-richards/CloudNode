@@ -2,6 +2,7 @@
 
 #include "WebRTCClient.hpp"
 #include "WebRTCServer.hpp"
+#include <mutex> // Required for synchronization primitives
 
 /**
  * @file WebRTC.cpp
@@ -21,10 +22,15 @@ WebRTC::Create(const PropertyBag& properties) {
     return std::make_unique<WebRTCClient>(properties);
 }
 
+
+
 WebRTC::WebRTC(MessagePort::Type type, const PropertyBag& properties)
         : m_properties(properties),
             m_messagePort(MessagePort::Create(type, m_properties.Get<std::string>("name"))) {
-        m_messagePort->OnOpen([this](MessagePort::Ws* ws, const std::string& peer) {
+    // Note: If the mutex member is initialized here, it should be done in the initializer list.
+    // Assuming m_roomMutex is a private member of WebRTC.
+
+    m_messagePort->OnOpen([this](MessagePort::Ws* ws, const std::string& peer) {
                 m_currentWebSocket = ws;
         OnMessageOpen(peer);
     });
@@ -38,27 +44,38 @@ WebRTC::WebRTC(MessagePort::Type type, const PropertyBag& properties)
     });
 }
 
-bool WebRTC::Start() {
+
+
+bool
+WebRTC::Start() {
     return m_messagePort->Start(
         m_properties.Get<std::string>("messageAddress"),
         m_properties.Get<int>("messagePort")
     );
 }
 
+
+
 void WebRTC::Stop() {
     m_messagePort->Stop();
 }
+
+
 
 bool WebRTC::IsRunning() {
     return m_messagePort->IsRunning();
 }
 
+
+
 bool
-WebRTC::
-GetPeers(
+WebRTC::GetPeers(
     const std::string& room,
     std::vector<std::string>& peers
 ) {
+    // Use lock guard to protect access to m_rooms
+    std::lock_guard<std::mutex> lock(m_roomMutex);
+
     auto roomIt = m_rooms.find(room);
     if (roomIt == m_rooms.end()) {
         return false;
@@ -68,11 +85,26 @@ GetPeers(
     return true;
 }
 
+
+void
+WebRTC::UpdatePeers(
+    const std::string& room,
+    std::set<std::string>& peers
+) {
+    // Use lock guard to protect modification of m_rooms
+    std::lock_guard<std::mutex> lock(m_roomMutex);
+    m_rooms[room] = std::move(peers);
+}
+
+
 bool
 WebRTC::Join(
     const std::string& peer,
     const std::string& room
 ) {
+    // Use lock guard to protect modification of m_rooms
+    std::lock_guard<std::mutex> lock(m_roomMutex);
+
     auto& peers = m_rooms[room];
     if (!peers.insert(peer).second) {
         Logger::warn() << peer << " already joined " << room << ".";
@@ -90,11 +122,15 @@ WebRTC::Join(
 }
 
 
+
 bool
 WebRTC::Leave(
     const std::string& peer,
     const std::string& room
 ) {
+    // Use lock guard to protect access and modification of m_rooms
+    std::lock_guard<std::mutex> lock(m_roomMutex);
+
     if (m_rooms.find(room) == m_rooms.end()) {
         Logger::warn() << "Room \'" << room << "\', does not exist.";
         return false;
