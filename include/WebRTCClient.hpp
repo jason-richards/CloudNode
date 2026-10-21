@@ -330,7 +330,10 @@ private:
     std::map<std::string, PendingOffer> m_pendingOffers;
 
     mutable std::mutex m_dataChannelsMutex;
+    /** @brief Channels this client offered (we send files); answers and candidates route here. */
     std::map<PeerRoomKey, DataChannel> m_dataChannels;
+    /** @brief Channels the peer offered (we receive files); separate so both directions can coexist. */
+    std::map<PeerRoomKey, DataChannel> m_incomingChannels;
 
     /** @brief Guards m_incomingFiles and writes to the open files. */
     std::mutex m_incomingMutex;

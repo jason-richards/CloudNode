@@ -114,16 +114,16 @@ def main():
                  "--file", str(dir1 / name1_file)],
             )
             wait_for(
-                lambda: f"SendFileOffer peer='client-2'" in read(log1) or "file_offer" in read(server_log),
-                "client-1 to submit its offer",
+                lambda: "has joined room" in read(server_log),
+                "client-1 to join the room",
                 15,
                 [server, client1],
             )
 
-            # Hold client 2 back so the offer has to be queued.
+            # Hold client 2 back; client 1 must defer its offer until then.
             time.sleep(2)
-            if "Received file offer" in read(log1):
-                raise AssertionError("Client 1 unexpectedly received an offer")
+            if "SendFileOffer" in read(log1):
+                raise AssertionError("Client 1 made its offer before client 2 was online")
             if client1.poll() is not None:
                 raise AssertionError("Client 1 exited while waiting for client 2")
 
@@ -152,8 +152,8 @@ def main():
                 all_procs,
             )
             wait_for(
-                lambda: f"File transfer to 'client-2' in room '{ROOM}' completed." in read(log1),
-                "client-1 completion notice",
+                lambda: f"File transfer to 'client-1' in room '{ROOM}' completed." in read(log2),
+                "client-2 completion notice",
                 15,
                 all_procs,
             )
@@ -172,8 +172,8 @@ def main():
                 all_procs,
             )
             wait_for(
-                lambda: f"File transfer to 'client-1' in room '{ROOM}' completed." in read(log2),
-                "client-2 completion notice",
+                lambda: f"File transfer to 'client-2' in room '{ROOM}' completed." in read(log1),
+                "client-1 completion notice",
                 15,
                 all_procs,
             )

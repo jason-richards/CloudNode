@@ -7,6 +7,7 @@
 #include "rapidjson/writer.h"
 #include "rtc/rtc.hpp"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstring>
@@ -402,8 +403,8 @@ WebRTCClient::OnJoin(
     if (m_clientState == ClientState::CLIENT_WAITING_FOR_JOIN &&
         room == m_room && peer == clientName) {
         m_clientState = ClientState::CLIENT_JOINED;
-        m_clientStateChanged.notify_all();
     }
+    m_clientStateChanged.notify_all();
 }
 
 
@@ -589,14 +590,14 @@ WebRTCClient::OnOffer(
     auto peerConnection = dataChannel.pc;
     {
         std::lock_guard<std::mutex> lock(m_dataChannelsMutex);
-        m_dataChannels.insert_or_assign(key, dataChannel);
+        m_incomingChannels.insert_or_assign(key, dataChannel);
     }
 
     peerConnection->onDataChannel([this, key, peer, weakPeerConnection = rtc::weak_ptr(peerConnection)](std::shared_ptr<rtc::DataChannel> dc) {
         {
             std::lock_guard<std::mutex> lock(m_dataChannelsMutex);
-            auto it = m_dataChannels.find(key);
-            if (it != m_dataChannels.end()) {
+            auto it = m_incomingChannels.find(key);
+            if (it != m_incomingChannels.end()) {
                 it->second.channel = dc;
             }
         }
@@ -1105,6 +1106,21 @@ WebRTCClient::StartClient() {
                 if (!m_peer.empty()) {
                     const auto peer = m_peer;
                     const auto room = m_room;
+                    const auto peerPresent = [this, &peer, &room]() {
+                        std::vector<std::string> peers;
+                        GetPeers(room, peers);
+                        return std::find(peers.begin(), peers.end(), peer) != peers.end();
+                    };
+                    if (!m_clientStateChanged.wait_for(lock, timeout, [&]() {
+                        return m_clientState == ClientState::CLIENT_EXIT || peerPresent();
+                    })) {
+                        Logger::warn() << "Timed out waiting for peer '" << peer << "' to join room '" << room << "'.";
+                        m_clientState = ClientState::CLIENT_EXIT;
+                        continue;
+                    }
+                    if (m_clientState == ClientState::CLIENT_EXIT) {
+                        continue;
+                    }
                     lock.unlock();
                     const bool channelCreated = MakeDataChannel(peer, room);
                     lock.lock();
