@@ -173,8 +173,6 @@ private:
      * @brief Maps a client identity to its corresponding websocket reference.
      */
     std::map<std::string, MessagePort::Ws*> m_clientDB;
-    std::map<std::string, ClientState> m_clientStateDB;
-
 };
 
 #endif // WEBRTC_SERVER_HPP

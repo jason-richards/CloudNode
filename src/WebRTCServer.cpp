@@ -90,8 +90,6 @@ WebRTCServer::OnJoin(
     for (auto u : m_rooms[room]) {
         SendJoinNotification(u, peer, room, m_rooms[room]);
     }
-
-    m_clientStateDB[peer] = ClientState::CLIENT_INIT;
 }
 
 
@@ -252,17 +250,7 @@ WebRTCServer::OnFileOffer(
         << "\': "
         << file.name;
 
-    if (m_clientStateDB[id] == ClientState::CLIENT_FILE_SEND) {
-        Logger::error()
-            << "User \'"
-            << id
-            << "\" already in CLIENT_FILE_SEND state!";
-        return;
-    }
-
-    if (HandleFile(doc, file)) {
-        m_clientStateDB[id] = ClientState::CLIENT_FILE_SEND;
-    }
+    HandleFile(doc, file);
 }
 
 
@@ -312,8 +300,6 @@ WebRTCServer::OnFileComplete(
         Logger::error() << "Error forwarding file completion to '" << peer << "'.";
         return;
     }
-
-    m_clientStateDB[from] = ClientState::CLIENT_INIT;
 }
 
 void
@@ -480,17 +466,7 @@ WebRTCServer::OnFileAccept(
         << "\': "
         << file.name;
 
-    if (m_clientStateDB[id] == ClientState::CLIENT_WAIT_FOR_FILE) {
-        Logger::error()
-            << "User \'"
-            << id
-            << "\" already in CLIENT_WAIT_FOR_FILE state!";
-        return;
-    }
-
-    if (HandleFile(doc, file)) {
-        m_clientStateDB[id] = ClientState::CLIENT_WAIT_FOR_FILE;
-    }
+    HandleFile(doc, file);
 }
 
 
@@ -508,9 +484,8 @@ WebRTCServer::OnFileReject(
 
     FileDetails file{doc["file"]["name"].GetString(), 0, ""};
     const std::string sender = doc["peer"].GetString();
-    if (HandleFile(doc, file)) {
-        m_clientStateDB[sender] = ClientState::CLIENT_INIT;
-    }
+
+    HandleFile(doc, file);
 }
 
 
