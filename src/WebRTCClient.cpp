@@ -138,25 +138,6 @@ WebRTCClient::MakeDataChannel(
                     continue;
                 }
 
-                bool fileAccepted = false;
-                {
-                    std::unique_lock<std::mutex> lock(fileDecision->mutex);
-                    fileDecision->changed.wait(lock, [fileDecision]() {
-                        return fileDecision->fileAccepted || fileDecision->fileRejected ||
-                               fileDecision->closed;
-                    });
-                    if (fileDecision->closed || !channel->isOpen()) {
-                        return;
-                    }
-                    fileAccepted = fileDecision->fileAccepted;
-                    fileDecision->fileAccepted = false;
-                    fileDecision->fileRejected = false;
-                }
-                if (!fileAccepted) {
-                    Logger::info() << "File offer was rejected; skipping queued file.";
-                    continue;
-                }
-
                 const auto& filePath = *queuedFilePath;
                 std::ifstream file(filePath, std::ios::binary);
                 if (!file) {
@@ -235,7 +216,30 @@ WebRTCClient::MakeDataChannel(
 
 
 
-void
+bool
+WebRTCClient::TakePendingOffer(
+    const rapidjson::Document& doc,
+    PendingOffer& offer
+) {
+    if (!doc.HasMember("uuid") || !doc["uuid"].IsString()) {
+        Logger::warn() << "File response is missing its uuid.";
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(m_pendingMutex);
+    auto it = m_pendingOffers.find(doc["uuid"].GetString());
+    if (it == m_pendingOffers.end()) {
+        Logger::warn() << "File response does not match a pending offer.";
+        return false;
+    }
+    offer = std::move(it->second);
+    m_pendingOffers.erase(it);
+    return true;
+}
+
+
+
+bool
 WebRTCClient::SendFileOffer(
     const std::string& room,
     const std::string& peer,
@@ -266,14 +270,14 @@ WebRTCClient::SendFileOffer(
         }
     } catch (const std::exception& e) {
         Logger::error() << "Unable to resolve file path: " << e.what();
-        return;
+        return false;
     }
 
     if (!md.get_file_info(fileDetails, fdsc, offeredPath)) {
         Logger::error()
             << "Error: "
             << fdsc;
-        return;
+        return false;
     }
 
     DataChannel dataChannel;
@@ -282,7 +286,7 @@ WebRTCClient::SendFileOffer(
         auto it = m_dataChannels.find({peer, room});
         if (it == m_dataChannels.end() || !it->second) {
             Logger::error() << "No data channel is available for peer '" << peer << "' in room '" << room << "'.";
-            return;
+            return false;
         }
         dataChannel = it->second;
     }
@@ -290,13 +294,14 @@ WebRTCClient::SendFileOffer(
         std::lock_guard<std::mutex> lock(m_clientStateMutex);
         m_clientState = ClientState::CLIENT_WAIT_FOR_FILE_ACCEPT;
     }
+    const std::string uuid = generateUUID();
     {
-        std::lock_guard<std::mutex> lock(dataChannel.fileDecision->mutex);
-        dataChannel.fileDecision->fileAccepted = false;
-        dataChannel.fileDecision->fileRejected = false;
+        std::lock_guard<std::mutex> lock(m_pendingMutex);
+        m_pendingOffers[uuid] = PendingOffer{{peer, room}, fileDetails};
     }
     std::string payload = "";
     payload += "{\"type\" : \"file_offer\", ";
+    payload += " \"uuid\" : \"" + uuid + "\", ";
     payload += " \"room\" : \"" + room + "\", ";
     payload += " \"peer\" : \"" + peer + "\", ";
     payload += " \"file\" : "   + fdsc + " ";
@@ -307,13 +312,17 @@ WebRTCClient::SendFileOffer(
     if (!SendMessage(payload)) {
         Logger::error() << "Unable to send file_offer command for room '" << room << "'.";
         {
+            std::lock_guard<std::mutex> lock(m_pendingMutex);
+            m_pendingOffers.erase(uuid);
+        }
+        {
             std::lock_guard<std::mutex> lock(m_clientStateMutex);
             m_clientState = ClientState::CLIENT_RUN;
         }
         m_clientStateChanged.notify_all();
-        return;
+        return false;
     }
-    AddItem(dataChannel.fileQ, std::make_shared<std::string>(fileDetails));
+    return true;
 }
 
 
@@ -437,31 +446,24 @@ WebRTCClient::OnFileAccept(
 ) {
     Logger::info() << "FileAccept";
 
-    const std::string peer = doc.HasMember("peer") && doc["peer"].IsString()
-        ? doc["peer"].GetString() : m_peer;
-    const std::string room = doc.HasMember("room") && doc["room"].IsString()
-        ? doc["room"].GetString() : m_room;
-    if (peer != m_peer || room != m_room) {
-        Logger::warn() << "Ignoring file acceptance for a different peer or room.";
+    PendingOffer offer;
+    if (!TakePendingOffer(doc, offer)) {
         return;
     }
 
-    std::shared_ptr<FileTransferDecision> decision;
+    QueuePtr<std::string> fileQ;
     {
         std::lock_guard<std::mutex> lock(m_dataChannelsMutex);
-        auto it = m_dataChannels.find({peer, room});
-        if (it == m_dataChannels.end()) {
-            Logger::error() << "Received file accept with no active data channel.";
-            return;
+        auto it = m_dataChannels.find(offer.key);
+        if (it != m_dataChannels.end()) {
+            fileQ = it->second.fileQ;
         }
-        decision = it->second.fileDecision;
     }
-    {
-        std::lock_guard<std::mutex> lock(decision->mutex);
-        decision->fileAccepted = true;
-        decision->fileRejected = false;
+    if (!fileQ) {
+        Logger::error() << "Received file accept with no active data channel.";
+        return;
     }
-    decision->changed.notify_all();
+    AddItem(fileQ, std::make_shared<std::string>(offer.path));
 
     {
         std::lock_guard<std::mutex> lock(m_clientStateMutex);
@@ -512,32 +514,11 @@ void
 WebRTCClient::OnFileReject(
     rapidjson::Document& doc
 ) {
-    const std::string peer = doc.HasMember("peer") && doc["peer"].IsString()
-        ? doc["peer"].GetString() : m_peer;
-    const std::string room = doc.HasMember("room") && doc["room"].IsString()
-        ? doc["room"].GetString() : m_room;
-    if (peer != m_peer || room != m_room) {
-        Logger::warn() << "Ignoring file rejection for a different peer or room.";
+    PendingOffer offer;
+    if (!TakePendingOffer(doc, offer)) {
         return;
     }
-
-    std::shared_ptr<FileTransferDecision> decision;
-    {
-        std::lock_guard<std::mutex> lock(m_dataChannelsMutex);
-        auto it = m_dataChannels.find({peer, room});
-        if (it == m_dataChannels.end()) {
-            Logger::warn() << "Ignoring file rejection without an active data channel.";
-            return;
-        }
-        decision = it->second.fileDecision;
-    }
-    {
-        std::lock_guard<std::mutex> lock(decision->mutex);
-        decision->fileAccepted = false;
-        decision->fileRejected = true;
-    }
-    decision->changed.notify_all();
-    Logger::info() << "File offer rejected by '" << peer << "' in room '" << room << "'.";
+    Logger::info() << "File offer rejected: " << offer.path;
 
     {
         std::lock_guard<std::mutex> lock(m_clientStateMutex);
@@ -944,8 +925,9 @@ void
 WebRTCClient::SendFileReject(
     rapidjson::Document& doc
 ) {
-    if (!doc.HasMember("peer") || !doc["peer"].IsString()) {
-        Logger::warn() << "Cannot reject a file offer without a sender.";
+    if (!doc.HasMember("peer") || !doc["peer"].IsString() ||
+        !doc.HasMember("uuid") || !doc["uuid"].IsString()) {
+        Logger::warn() << "Cannot reject a file offer without a sender and uuid.";
         return;
     }
 
@@ -1137,17 +1119,30 @@ WebRTCClient::StartClient() {
             }
 
 
-            // STEP 3: If file is set, send it
+            // STEP 3: If files are set (comma-separated), send them one at a time
             if (Properties().Contains("file")) {
                 m_file = Properties().Get<std::string>("file");
 
                 if (!m_peer.empty() && !m_file.empty()) {
                     const auto peer = m_peer;
                     const auto room = m_room;
-                    const auto file = m_file;
-                    lock.unlock();
-                    SendFileOffer(room, peer, file);
-                    lock.lock();
+                    const auto files = m_file;
+                    size_t start = 0;
+                    while (start <= files.size() && m_clientState != ClientState::CLIENT_EXIT) {
+                        size_t end = files.find(',', start);
+                        if (end == std::string::npos) {
+                            end = files.size();
+                        }
+                        const auto file = files.substr(start, end - start);
+                        start = end + 1;
+                        if (file.empty()) {
+                            continue;
+                        }
+
+                        lock.unlock();
+                        SendFileOffer(room, peer, file);
+                        lock.lock();
+                    }
                     if (m_clientState == ClientState::CLIENT_EXIT) {
                         continue;
                     }

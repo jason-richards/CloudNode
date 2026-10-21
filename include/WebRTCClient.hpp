@@ -98,8 +98,9 @@ public:
      * @param room Room that contains the sender and recipient.
      * @param peer Identifier of the intended file recipient.
      * @param fileDetails Path to the file that will be transferred.
+     * @return true if the offer was sent and the file queued.
      */
-    void
+    bool
     SendFileOffer(
         const std::string&  room,
         const std::string&  peer,
@@ -244,6 +245,17 @@ private:
      */
     void StartClient();
 
+    using PeerRoomKey = std::pair<std::string, std::string>;
+
+    /** @brief An offered file awaiting accept or reject. */
+    struct PendingOffer {
+        PeerRoomKey key;
+        std::string path;
+    };
+
+    /** @brief Removes the pending offer named by the response's uuid; false if none. */
+    bool TakePendingOffer(const rapidjson::Document& doc, PendingOffer& offer);
+
     /** @brief Wakes transfer workers waiting for an accept/reject decision. */
     void WakeFileTransferWorkers();
 
@@ -314,7 +326,9 @@ private:
      */
     std::string m_file;
 
-    using PeerRoomKey = std::pair<std::string, std::string>;
+    std::mutex m_pendingMutex;
+    std::map<std::string, PendingOffer> m_pendingOffers;
+
     mutable std::mutex m_dataChannelsMutex;
     std::map<PeerRoomKey, DataChannel> m_dataChannels;
 
