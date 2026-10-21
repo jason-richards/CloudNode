@@ -3,6 +3,7 @@
 
 #include <App.h>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <string>
 #include <functional>
@@ -119,6 +120,12 @@ public:
      * @return true when the message is accepted for transmission.
      */
     virtual bool Send(const std::string& message) = 0;
+
+    /**
+     * @brief Sets the delay between reconnection attempts; no-op for transports that never reconnect.
+     * @param delay Time to wait before each reconnection attempt.
+     */
+    virtual void SetReconnectDelay(std::chrono::seconds delay) { (void) delay; }
 
     /**
      * @brief Stops the transport and releases active connections.

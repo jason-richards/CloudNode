@@ -1,6 +1,8 @@
 #include "MessagePortClient.hpp"
 #include "Logger.hpp"
 
+#include <algorithm>
+
 void MessagePortClient::OnMessage(MessageCallback callback) {
     m_messageCallback = std::move(callback);
 }
@@ -20,15 +22,52 @@ bool MessagePortClient::Start(const std::string& address, int port) {
     }
     m_stopRequested = false;
 
-    m_socket = std::make_unique<ix::WebSocket>();
-    m_socket->setUrl(address + ":" + std::to_string(port));
+    const std::string url = address + ":" + std::to_string(port);
+
+    m_serverThread = std::thread([this, url]() {
+        // A fresh socket per attempt avoids stale transport state after a server restart.
+        const auto delay = std::max(m_reconnectDelay, std::chrono::seconds(1));
+        while (true) {
+            auto socket = MakeSocket(url);
+            {
+                std::lock_guard<std::mutex> lock(m_mtx);
+                if (m_stopRequested) {
+                    break;
+                }
+                m_disconnected = false;
+                m_socket = std::move(socket);
+            }
+            m_socket->start();
+
+            std::unique_lock<std::mutex> lock(m_mtx);
+            m_runningChanged.wait(lock, [this]() { return m_disconnected || m_stopRequested; });
+            lock.unlock();
+            m_socket->stop();
+            lock.lock();
+            if (m_stopRequested) {
+                break;
+            }
+            m_runningChanged.wait_for(lock, delay, [this]() { return m_stopRequested; });
+            if (m_stopRequested) {
+                break;
+            }
+        }
+    });
+
+    return true;
+}
+
+std::unique_ptr<ix::WebSocket> MessagePortClient::MakeSocket(const std::string& url) {
+    auto socket = std::make_unique<ix::WebSocket>();
+    socket->setUrl(url);
+    socket->disableAutomaticReconnection();
 
     ix::WebSocketHttpHeaders headers;
     headers["x-client-id"] = m_name;
-    m_socket->setExtraHeaders(headers);
+    socket->setExtraHeaders(headers);
 
     // Translate WebSocket events into MessagePortClient state and callbacks.
-    m_socket->setOnMessageCallback([this](const ix::WebSocketMessagePtr& msg) {
+    socket->setOnMessageCallback([this](const ix::WebSocketMessagePtr& msg) {
         if (!msg) {
             return;
         }
@@ -51,10 +90,11 @@ bool MessagePortClient::Start(const std::string& address, int port) {
             }
             break;
         case ix::WebSocketMessageType::Close:
-            Logger::info() << "ix::WebSocketMessageType::Close";
+            Logger::info() << "ix::WebSocketMessageType::Close " << msg->closeInfo.code << " '" << msg->closeInfo.reason << "'";
             {
                 std::lock_guard<std::mutex> lock(m_mtx);
                 m_isRunning = false;
+                m_disconnected = true;
             }
             m_runningChanged.notify_all();
             if (m_closeCallback) {
@@ -65,6 +105,7 @@ bool MessagePortClient::Start(const std::string& address, int port) {
             Logger::info() << "ix::WebSocketMessageType::Error";
             {
                 std::lock_guard<std::mutex> lock(m_mtx);
+                m_disconnected = true;
                 m_isRunning = false;
             }
             m_runningChanged.notify_all();
@@ -72,11 +113,11 @@ bool MessagePortClient::Start(const std::string& address, int port) {
         };
     });
 
-    m_serverThread = std::thread([this]() {
-        m_socket->start();
-    });
+    return socket;
+}
 
-    return true;
+void MessagePortClient::SetReconnectDelay(std::chrono::seconds delay) {
+    m_reconnectDelay = delay;
 }
 
 bool MessagePortClient::Send(const std::string& message) {
@@ -96,9 +137,6 @@ void MessagePortClient::Stop() {
     }
     m_runningChanged.notify_all();
 
-    if (m_socket) {
-        m_socket->stop();
-    }
     if (m_serverThread.joinable()) {
         m_serverThread.join();
     }

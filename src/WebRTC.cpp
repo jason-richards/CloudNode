@@ -48,6 +48,9 @@ WebRTC::WebRTC(MessagePort::Type type, const PropertyBag& properties)
 
 bool
 WebRTC::Start() {
+    if (m_properties.Contains("timeout")) {
+        m_messagePort->SetReconnectDelay(std::chrono::seconds(m_properties.Get<int>("timeout")));
+    }
     return m_messagePort->Start(
         m_properties.Get<std::string>("messageAddress"),
         m_properties.Get<int>("messagePort")

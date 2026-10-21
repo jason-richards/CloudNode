@@ -63,6 +63,12 @@ public:
     bool Send(const std::string& message) override;
 
     /**
+     * @brief Sets the fixed wait between reconnection attempts.
+     * @param delay Time to wait before each reconnection attempt.
+     */
+    void SetReconnectDelay(std::chrono::seconds delay) override;
+
+    /**
      * @brief Closes the client websocket and disables future sends.
      */
     void Stop() override;
@@ -78,6 +84,12 @@ private:
      * @brief Underlying websocket implementation used by the client transport.
      */
     std::unique_ptr<ix::WebSocket> m_socket;
+
+    std::unique_ptr<ix::WebSocket> MakeSocket(const std::string& url);
+
+    bool m_disconnected{false};
+
+    std::chrono::seconds m_reconnectDelay{0};
 };
 
 #endif // CONTROL_PORT_CLIENT_HPP
