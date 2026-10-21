@@ -216,10 +216,38 @@ TEST(RandomNameTests, GeneratesNamesWithExpectedStructure) {
     EXPECT_TRUE(std::regex_match(name, generatedName));
 }
 
-TEST(FileReceiveTests, DISABLED_IncomingChunksAreWrittenUnderConfiguredDirectory) {
-    GTEST_FAIL() << "TODO: deliver an incoming file offer and binary chunks, then assert "
-                    "that the reconstructed file is written beneath the --directory path "
-                    "with the offered filename and exact chunk contents.";
+TEST(FileReceiveTests, IncomingChunksAreWrittenUnderConfiguredDirectory) {
+    const auto directory = std::filesystem::temp_directory_path() / "cloudnode-receive-test";
+    std::filesystem::remove_all(directory);
+
+    PropertyBag properties;
+    properties.Set("name", std::string("client-a"));
+    properties.Set("directory", directory.string());
+    WebRTCClient client(properties);
+    // An unstarted port makes SendMessage block forever; stopping it makes replies fail fast.
+    client.Stop();
+
+    client.MessageRouter(
+        R"({"type":"file_offer","peer":"client-b","room":"room-a",)"
+        R"("file":{"name":"sub/received.bin","size":8,"mimeType":"application/octet-stream"}})"
+    );
+
+    const std::string first("abc\0d", 5);
+    const std::string second("efg", 3);
+    client.OnIncomingChunk("client-b", "room-a", rtc::binary(
+        reinterpret_cast<const std::byte*>(first.data()),
+        reinterpret_cast<const std::byte*>(first.data()) + first.size()));
+    client.OnIncomingChunk("client-b", "room-a", rtc::binary(
+        reinterpret_cast<const std::byte*>(second.data()),
+        reinterpret_cast<const std::byte*>(second.data()) + second.size()));
+
+    const auto written = directory / "sub" / "received.bin";
+    ASSERT_TRUE(std::filesystem::exists(written));
+    std::ifstream in(written, std::ios::binary);
+    const std::string contents((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(contents, first + second);
+
+    std::filesystem::remove_all(directory);
 }
 
 } // namespace

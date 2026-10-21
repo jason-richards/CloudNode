@@ -107,6 +107,14 @@ public:
     );
 
 
+    /** @brief Appends a received binary chunk to the file offered by peer in room. */
+    void
+    OnIncomingChunk(
+        const std::string& peer,
+        const std::string& room,
+        const rtc::binary& bytes
+    );
+
     void
     SendFileAccept(
         rapidjson::Document& doc

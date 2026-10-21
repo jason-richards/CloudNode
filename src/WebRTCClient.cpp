@@ -664,37 +664,7 @@ WebRTCClient::OnOffer(
                     << "\" received, size="
                     << bytes.size();
 
-                bool transferComplete = false;
-                {
-                    std::lock_guard<std::mutex> lock(m_incomingMutex);
-                    auto it = m_incomingFiles.find(key);
-                    if (it != m_incomingFiles.end() && it->second.stream.is_open()) {
-                        auto& file = it->second;
-                        file.stream.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-                        file.stream.flush();
-                        const auto bytesWritten = file.stream.tellp();
-                        if (!file.stream || bytesWritten == std::streampos(-1)) {
-                            Logger::error() << "Failed writing incoming file for peer '" << peer << "'.";
-                            file.stream.close();
-                            m_incomingFiles.erase(it);
-                        } else if (bytesWritten == file.expectedSize) {
-                            file.stream.close();
-                            m_incomingFiles.erase(it);
-                            transferComplete = true;
-                        } else if (bytesWritten > file.expectedSize) {
-                            Logger::error() << "Incoming file exceeded its offered size for peer '" << peer << "'.";
-                            file.stream.close();
-                            m_incomingFiles.erase(it);
-                        }
-                    }
-                }
-                if (transferComplete) {
-                    {
-                        std::lock_guard<std::mutex> lock(m_clientStateMutex);
-                        m_clientState = ClientState::CLIENT_RUN;
-                    }
-                    m_clientStateChanged.notify_all();
-                }
+                OnIncomingChunk(key.first, key.second, bytes);
             }
         });
     });
@@ -901,6 +871,45 @@ WebRTCClient::OnFileOffer(
     Logger::info() << "Receiving file into: " << destination.string();
 
     SendFileAccept(doc);
+}
+
+void
+WebRTCClient::OnIncomingChunk(
+    const std::string& peer,
+    const std::string& room,
+    const rtc::binary& bytes
+) {
+    bool transferComplete = false;
+    {
+        std::lock_guard<std::mutex> lock(m_incomingMutex);
+        auto it = m_incomingFiles.find({peer, room});
+        if (it != m_incomingFiles.end() && it->second.stream.is_open()) {
+            auto& file = it->second;
+            file.stream.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+            file.stream.flush();
+            const auto bytesWritten = file.stream.tellp();
+            if (!file.stream || bytesWritten == std::streampos(-1)) {
+                Logger::error() << "Failed writing incoming file for peer '" << peer << "'.";
+                file.stream.close();
+                m_incomingFiles.erase(it);
+            } else if (bytesWritten == file.expectedSize) {
+                file.stream.close();
+                m_incomingFiles.erase(it);
+                transferComplete = true;
+            } else if (bytesWritten > file.expectedSize) {
+                Logger::error() << "Incoming file exceeded its offered size for peer '" << peer << "'.";
+                file.stream.close();
+                m_incomingFiles.erase(it);
+            }
+        }
+    }
+    if (transferComplete) {
+        {
+            std::lock_guard<std::mutex> lock(m_clientStateMutex);
+            m_clientState = ClientState::CLIENT_RUN;
+        }
+        m_clientStateChanged.notify_all();
+    }
 }
 
 void

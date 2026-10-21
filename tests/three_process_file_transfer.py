@@ -113,7 +113,7 @@ def main():
                 received_sizes = [
                     int(size)
                     for size in re.findall(
-                        r'Binary message from "client-b" received, size=(\d+)', content
+                        r'Binary message peer "client-b" received, size=(\d+)', content
                     )
                 ]
                 return sum(received_sizes) == len(payload)
@@ -129,7 +129,7 @@ def main():
             received_sizes = [
                 int(size)
                 for size in re.findall(
-                    r'Binary message from "client-b" received, size=(\d+)',
+                    r'Binary message peer "client-b" received, size=(\d+)',
                     client_a_log.read_text(errors="replace"),
                 )
             ]
