@@ -60,6 +60,25 @@ sender's offered filename is relative to its configured `--directory` when
 possible, which lets the receiver preserve subdirectories beneath its own
 destination directory.
 
+## Keeping Two Directories in Sync
+
+Give each client a `--directory` and set `--peer` to the other client's name.
+Once the peer is online, the client opens a data channel to it and watches its
+directory tree. Every new or modified file, including files in subdirectories
+created later, is sent to the peer; deletions are not propagated.
+
+```sh
+./build/CloudNode --name alice --room sync --peer bob   --directory ./alice-files
+./build/CloudNode --name bob   --room sync --peer alice --directory ./bob-files
+```
+
+Either client may start first; each waits for the other to appear. Files
+received from a peer are not sent back. If the connection to the server is
+lost, the clients reconnect and re-establish the channel.
+
+With `--peer`, `--file` is a plain comma-separated list of paths sent to that
+peer in `--room` when the channel opens, instead of `peer:room:path` entries.
+
 ## How File Transfer Works
 
 1. Clients connect to the signalling server over WebSocket and join rooms. The
@@ -89,7 +108,8 @@ are entry separators.
 | `-s`, `--server` | Client mode | Run the signalling server. |
 | `-n`, `--name NAME` | Automatically generated unique name | Client identity. |
 | `-r`, `--room ROOM` | `DefaultRoom#1` | Room to join. |
-| `-f`, `--file LIST` | None | Comma-separated `peer:room:path` files to offer. |
+| `-p`, `--peer NAME` | None | Peer to connect to at startup; changed files in `--directory` are sent to it. |
+| `-f`, `--file LIST` | None | Files to offer: `peer:room:path` entries, or plain paths when `--peer` is set. |
 | `-d`, `--directory DIR` | Current directory for received files | Receive destination; also used to make offered file names relative when possible. |
 | `--messageAddress URL` | `ws://localhost` | Signalling server address. |
 | `--messagePort PORT` | `8080` | Signalling server port. |
