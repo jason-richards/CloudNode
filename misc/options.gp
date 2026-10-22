@@ -8,7 +8,8 @@ NONE / stunPort             int     19302                   "STUN server port"
 n    / name                 string  {""}                    "client name"
 d    / directory            string  {""}                    "directory containing files"
 r    / room                 string  {"DefaultRoom#1"}       "message room name"
-f    / file                 string  {""}                    "files to send as comma-separated peer:room:path entries"
+p    / peer                 string  {""}                    "peer to receive --file entries given as plain paths (sent in --room)"
+f    / file                 string  {""}                    "files to send: comma-separated paths with --peer, otherwise peer:room:path entries"
 
 #usage_begin
 usage: __PROGRAM_NAME__ [options]

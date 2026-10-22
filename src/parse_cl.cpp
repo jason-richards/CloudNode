@@ -2,7 +2,7 @@
 **
 ** parse_cl.cpp
 **
-** Wed Oct 21 10:49:13 2026
+** Thu Oct 22 14:27:19 2026
 ** Linux 6.8.0-147-generic (#147-Ubuntu SMP PREEMPT_DYNAMIC Thu Sep 24 11:33:16 UTC 2026) x86_64
 ** jrichard@SpinRun42 (Jason Richards)
 **
@@ -44,6 +44,7 @@ Cmdline::Cmdline (int argc, char *argv[])
     {"name", required_argument, NULL, 'n'},
     {"directory", required_argument, NULL, 'd'},
     {"room", required_argument, NULL, 'r'},
+    {"peer", required_argument, NULL, 'p'},
     {"file", required_argument, NULL, 'f'},
     {"help", no_argument, NULL, 'h'},
     {"version", no_argument, NULL, 'v'},
@@ -65,7 +66,7 @@ Cmdline::Cmdline (int argc, char *argv[])
   _version = false;
 
   optind = 0;
-  while ((c = getopt_long (argc, argv, "st:m:n:d:r:f:hv", long_options, &optind)) != - 1)
+  while ((c = getopt_long (argc, argv, "st:m:n:d:r:p:f:hv", long_options, &optind)) != - 1)
     {
       switch (c)
         {
@@ -107,6 +108,10 @@ Cmdline::Cmdline (int argc, char *argv[])
 
         case 'r': 
           _room = optarg;
+          break;
+
+        case 'p': 
+          _peer = optarg;
           break;
 
         case 'f': 
@@ -168,8 +173,10 @@ WebRTC file transfer client/server.\n\
           directory containing files\n\
    [ -r ] [ --room ] (type=STRING, default=DefaultRoom#1)\n\
           message room name\n\
+   [ -p ] [ --peer ] (type=STRING)\n\
+          peer to receive --file entries given as plain paths (sent in --room)\n\
    [ -f ] [ --file ] (type=STRING)\n\
-          files to send as comma-separated peer:room:path entries\n\
+          files to send: comma-separated paths with --peer, otherwise peer:room:path entries\n\
    [ -h ] [ --help ] (type=FLAG)\n\
           Display this help and exit.\n\
    [ -v ] [ --version ] (type=FLAG)\n\

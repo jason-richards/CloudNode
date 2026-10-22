@@ -2,7 +2,7 @@
 **
 ** parse_cl.h
 **
-** Wed Oct 21 10:49:13 2026
+** Thu Oct 22 14:27:19 2026
 ** Linux 6.8.0-147-generic (#147-Ubuntu SMP PREEMPT_DYNAMIC Thu Sep 24 11:33:16 UTC 2026) x86_64
 ** jrichard@SpinRun42 (Jason Richards)
 **
@@ -42,6 +42,7 @@ private:
   std::string _name;
   std::string _directory;
   std::string _room;
+  std::string _peer;
   std::string _file;
   bool _help;
   bool _version;
@@ -71,6 +72,7 @@ public:
   std::string name () const { return _name; }
   std::string directory () const { return _directory; }
   std::string room () const { return _room; }
+  std::string peer () const { return _peer; }
   std::string file () const { return _file; }
   bool help () const { return _help; }
   bool version () const { return _version; }

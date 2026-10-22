@@ -10,6 +10,8 @@
 #include "RandomName.hpp"
 #include "LocalDescription.hpp"
 #include "WebRTCServer.hpp"
+#include "WebRTCClient.hpp"
+#include "FileWatcher.hpp"
 #include "Logger.hpp"
 #include "StopToken.hpp"
 
@@ -68,6 +70,7 @@ main(
     properties.Set("server",            params.server());
     properties.Set("directory",         params.directory());
     properties.Set("room",              params.room());
+    properties.Set("peer",              params.peer());
     properties.Set("file",              params.file());
     properties.Set("help",              params.help());
     properties.Set("version",           params.version());
@@ -86,10 +89,26 @@ main(
         << (isServer ? " SERVER " : " CLIENT ")
         << "mode.";
 
+    FileWatcher watcher(params.directory());
+    auto* client = dynamic_cast<WebRTCClient*>(webRTC.get());
+    if (client && !params.directory().empty()) {
+        watcher.OnFile([client](const std::filesystem::path& file, FileChange change) {
+            if (change == FileChange::Removed || client->TakeReceivedFile(file.string())) {
+                return;
+            }
+            Logger::info() << "Directory change, sending: " << file.string();
+            client->QueueFileToAll(file.string());
+        });
+    }
+
     if (webRTC->Start()) {
+        if (client && !params.directory().empty()) {
+            watcher.Start();
+        }
         while (!StopRequested(g_stopToken) && (isServer || webRTC->IsRunning())) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
+        watcher.Stop();
         webRTC->Stop();
     }
 

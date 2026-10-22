@@ -874,6 +874,7 @@ WebRTCClient::OnFileOffer(
         incomingFile.stream.close();
         incomingFile.stream.clear();
         incomingFile.expectedSize = file["size"].GetInt64();
+        incomingFile.destination = destination;
         incomingFile.stream.open(destination, std::ios::binary | std::ios::trunc);
         if (!incomingFile.stream) {
             Logger::error() << "Unable to open destination file: " << destination.string();
@@ -884,6 +885,14 @@ WebRTCClient::OnFileOffer(
     Logger::info() << "Receiving file into: " << destination.string();
 
     SendFileAccept(doc);
+}
+
+bool
+WebRTCClient::TakeReceivedFile(
+    const std::string& path
+) {
+    std::lock_guard<std::mutex> lock(m_incomingMutex);
+    return m_receivedPaths.erase(fs::absolute(path).lexically_normal().string()) > 0;
 }
 
 void
@@ -901,16 +910,22 @@ WebRTCClient::OnIncomingChunk(
             file.stream.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
             file.stream.flush();
             const auto bytesWritten = file.stream.tellp();
+            const auto markReceived = [&]() {
+                m_receivedPaths.insert(fs::absolute(file.destination).lexically_normal().string());
+            };
             if (!file.stream || bytesWritten == std::streampos(-1)) {
                 Logger::error() << "Failed writing incoming file for peer '" << peer << "'.";
+                markReceived();
                 file.stream.close();
                 m_incomingFiles.erase(it);
             } else if (bytesWritten == file.expectedSize) {
+                markReceived();
                 file.stream.close();
                 m_incomingFiles.erase(it);
                 transferComplete = true;
             } else if (bytesWritten > file.expectedSize) {
                 Logger::error() << "Incoming file exceeded its offered size for peer '" << peer << "'.";
+                markReceived();
                 file.stream.close();
                 m_incomingFiles.erase(it);
             }
@@ -1113,7 +1128,24 @@ WebRTCClient::StartClient() {
 
             // STEP 1: Parse --file entries of the form peer:room:path
             std::vector<FileSpec> specs;
-            if (Properties().Contains("file") &&
+            const auto peerName = Properties().Contains("peer")
+                ? Properties().Get<std::string>("peer") : std::string();
+            if (Properties().Contains("file") && !peerName.empty()) {
+                // With --peer, --file is a plain comma-separated path list sent in --room.
+                const auto paths = Properties().Get<std::string>("file");
+                const auto roomName = Properties().Get<std::string>("room");
+                size_t start = 0;
+                while (start <= paths.size()) {
+                    size_t end = paths.find(',', start);
+                    if (end == std::string::npos) {
+                        end = paths.size();
+                    }
+                    if (end > start) {
+                        specs.push_back(FileSpec{peerName, roomName, paths.substr(start, end - start)});
+                    }
+                    start = end + 1;
+                }
+            } else if (Properties().Contains("file") &&
                 !ParseFileSpecs(Properties().Get<std::string>("file"), specs)) {
                 Logger::error() << "--file expects comma-separated peer:room:path entries.";
                 m_clientState = ClientState::CLIENT_EXIT;
@@ -1132,8 +1164,12 @@ WebRTCClient::StartClient() {
             rooms.erase(std::unique(rooms.begin(), rooms.end()), rooms.end());
 
             // STEP 3: Offer each file; OfferFiles waits for the peer and opens a data channel if needed
+            const auto roomName = Properties().Contains("room")
+                ? Properties().Get<std::string>("room") : std::string();
             lock.unlock();
-            const bool offered = JoinRooms(rooms) && OfferFiles(specs);
+            const bool offered = JoinRooms(rooms) &&
+                (peerName.empty() || ConnectPeer(peerName, roomName)) &&
+                OfferFiles(specs);
             lock.lock();
             if (!offered || m_clientState == ClientState::CLIENT_EXIT ||
                 m_clientState == ClientState::CLIENT_INIT) {
@@ -1243,6 +1279,30 @@ WebRTCClient::QueueFile(
 
 
 
+size_t
+WebRTCClient::QueueFileToAll(
+    const std::string& filePath
+) {
+    std::vector<PeerRoomKey> targets;
+    {
+        std::lock_guard<std::mutex> lock(m_dataChannelsMutex);
+        for (const auto& [key, dataChannel] : m_dataChannels) {
+            (void) dataChannel;
+            targets.push_back(key);
+        }
+    }
+
+    size_t queued = 0;
+    for (const auto& [peer, room] : targets) {
+        if (QueueFile(peer, room, filePath)) {
+            ++queued;
+        }
+    }
+    return queued;
+}
+
+
+
 bool
 WebRTCClient::InRoom(
     const std::string& room
@@ -1296,6 +1356,45 @@ WebRTCClient::JoinRooms(
         }
     }
     return true;
+}
+
+
+
+bool
+WebRTCClient::ConnectPeer(
+    const std::string& peer,
+    const std::string& room
+) {
+    std::unique_lock<std::mutex> lock(m_clientStateMutex);
+    const auto stopped = [this]() {
+        return m_clientState == ClientState::CLIENT_EXIT ||
+               m_clientState == ClientState::CLIENT_INIT;
+    };
+    Logger::info() << "Waiting for peer '" << peer << "' to join room '" << room << "'.";
+    m_clientStateChanged.wait(lock, [&]() {
+        std::vector<std::string> peers;
+        GetPeers(room, peers);
+        return stopped() || std::find(peers.begin(), peers.end(), peer) != peers.end();
+    });
+    if (stopped()) {
+        return false;
+    }
+    lock.unlock();
+
+    bool hasChannel;
+    {
+        std::lock_guard<std::mutex> channelsLock(m_dataChannelsMutex);
+        hasChannel = m_dataChannels.count({peer, room}) > 0;
+    }
+    if (hasChannel || MakeDataChannel(peer, room)) {
+        return true;
+    }
+
+    lock.lock();
+    if (!stopped()) {
+        m_clientState = ClientState::CLIENT_EXIT;
+    }
+    return false;
 }
 
 

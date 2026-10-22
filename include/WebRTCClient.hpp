@@ -7,6 +7,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <mutex>
@@ -101,6 +102,18 @@ public:
     );
 
 
+    /**
+     * @brief Queues a file for every peer/room this client has an outgoing data channel to.
+     * @return Number of requests queued.
+     */
+    size_t QueueFileToAll(const std::string& filePath);
+
+    /**
+     * @brief Consumes the record that path was just written by an incoming transfer.
+     * @return true if it was received (so it must not be sent back to peers).
+     */
+    bool TakeReceivedFile(const std::string& path);
+
     /** @brief Appends a received binary chunk to the file offered by peer in room. */
     void
     OnIncomingChunk(
@@ -114,6 +127,12 @@ public:
      * @return false if a join failed, timed out, or the client stopped.
      */
     bool JoinRooms(const std::vector<std::string>& rooms);
+
+    /**
+     * @brief Waits indefinitely for peer to be present in room, then opens a data channel if none exists.
+     * @return false if the data channel could not be created or the client stopped.
+     */
+    bool ConnectPeer(const std::string& peer, const std::string& room);
 
     /**
      * @brief Offers each file to its peer, joining the file's room first if needed.
@@ -381,10 +400,14 @@ private:
     struct IncomingFile {
         std::ofstream stream;
         std::int64_t expectedSize{0};
+        std::filesystem::path destination;
     };
 
     /** @brief Files currently being received, keyed by sender and room. */
     std::map<PeerRoomKey, IncomingFile> m_incomingFiles;
+
+    /** @brief Normalized paths of received files whose directory event has not been consumed; guarded by m_incomingMutex. */
+    std::set<std::string> m_receivedPaths;
 };
 
 #endif // WEBRTC_CLIENT_HPP
