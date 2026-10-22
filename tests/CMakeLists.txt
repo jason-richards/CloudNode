@@ -44,3 +44,15 @@ add_test(
         $<TARGET_FILE:CloudNode>
 )
 set_tests_properties(CloudNodeStaggeredFileTransfer PROPERTIES TIMEOUT 180)
+
+add_executable(QueueFileClient QueueFileClient.cpp)
+target_link_libraries(QueueFileClient PRIVATE CloudNodeCore Threads::Threads)
+
+add_test(
+    NAME CloudNodeQueueFileApiTransfer
+    COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/queue_file_api_transfer.py
+        $<TARGET_FILE:CloudNode>
+        $<TARGET_FILE:QueueFileClient>
+)
+set_tests_properties(CloudNodeQueueFileApiTransfer PROPERTIES TIMEOUT 180)

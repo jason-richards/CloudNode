@@ -83,20 +83,6 @@ public:
     void OnMessageClose(int code, std::string_view message) override;
 
     /**
-     * @brief Joins the client to a signalling room.
-     *
-     * @param room Identifier of the room to join.
-     * @return true if the join request was sent successfully.
-     */
-    bool JoinRoom(const std::string& room);
-
-    /**
-     * @brief Sends a lightweight ping to confirm the transport is alive.
-     * @return true if the ping message was accepted for sending.
-     */
-    bool SendPing();
-
-    /**
      * @brief Asynchronously queues a file for sending to a peer.
      *
      * Returns immediately. The client worker joins the room if needed, waits for
@@ -114,27 +100,6 @@ public:
         const std::string& filePath
     );
 
-    /**
-     * @brief Queues a file and sends its metadata offer to a peer.
-     *
-        * The outgoing data channel must already have been created for the peer and
-        * room. This method validates the file, sends a `file_offer` signalling
-        * message containing its metadata, and queues the path for transmission only
-        * after the peer accepts. SDP and ICE candidates are sent separately during
-        * channel creation.
-     *
-     * @param room Room that contains the sender and recipient.
-     * @param peer Identifier of the intended file recipient.
-     * @param fileDetails Path to the file that will be transferred.
-     * @return true if the offer was sent and the file queued.
-     */
-    bool
-    SendFileOffer(
-        const std::string&  room,
-        const std::string&  peer,
-        const std::string&  fileDetails
-    );
-
 
     /** @brief Appends a received binary chunk to the file offered by peer in room. */
     void
@@ -142,53 +107,6 @@ public:
         const std::string& peer,
         const std::string& room,
         const rtc::binary& bytes
-    );
-
-    void
-    SendFileAccept(
-        rapidjson::Document& doc
-    );
-
-    void
-    SendFileReject(
-        rapidjson::Document& doc
-    );
-
-    /**
-     * @brief Signal file transfer complete.
-     *
-     * This method is called when the file has been completely chunked and send over
-     * the data channel.
-     *
-     * @param room Room that contains the sender and recipient.
-     * @param peer Identifier of the intended file recipient.
-     * @param fileDetails Path to the file that will be transferred.
-     */
-    void
-    SendFileComplete(
-        const std::string& room,
-        const std::string& peer
-    );
-
-
-    /**
-     * @brief Creates an outgoing data channel and initiates peer negotiation.
-     *
-     * Configures the peer connection, gathers its initial SDP description and
-     * ICE candidates, stores the channel, and sends them to the peer in an
-     * `offer` message. When the channel opens, a worker sends each file path
-        * added to the channel's queue after its offer is accepted and signals
-        * completion after each transfer.
-     *
-     * @param peer Identifier of the intended remote peer.
-     * @param room Room containing the local client and remote peer.
-    * @return true if the channel was created and the offer was sent;
-    *         otherwise false.
-     */
-    bool
-    MakeDataChannel(
-        const std::string& peer,
-        const std::string& room
     );
 
     /**
@@ -290,6 +208,89 @@ private:
 
     /** @brief Files requested through QueueFile, guarded by m_clientStateMutex. */
     std::deque<FileSpec> m_queuedFiles;
+
+    /**
+     * @brief Joins the client to a signalling room.
+     *
+     * @param room Identifier of the room to join.
+     * @return true if the join request was sent successfully.
+     */
+    bool JoinRoom(const std::string& room);
+
+    /**
+     * @brief Sends a lightweight ping to confirm the transport is alive.
+     * @return true if the ping message was accepted for sending.
+     */
+    bool SendPing();
+
+    /**
+     * @brief Queues a file and sends its metadata offer to a peer.
+     *
+        * The outgoing data channel must already have been created for the peer and
+        * room. This method validates the file, sends a `file_offer` signalling
+        * message containing its metadata, and queues the path for transmission only
+        * after the peer accepts. SDP and ICE candidates are sent separately during
+        * channel creation.
+     *
+     * @param room Room that contains the sender and recipient.
+     * @param peer Identifier of the intended file recipient.
+     * @param fileDetails Path to the file that will be transferred.
+     * @return true if the offer was sent and the file queued.
+     */
+    bool
+    SendFileOffer(
+        const std::string&  room,
+        const std::string&  peer,
+        const std::string&  fileDetails
+    );
+
+
+    void
+    SendFileAccept(
+        rapidjson::Document& doc
+    );
+
+    void
+    SendFileReject(
+        rapidjson::Document& doc
+    );
+
+    /**
+     * @brief Signal file transfer complete.
+     *
+     * This method is called when the file has been completely chunked and send over
+     * the data channel.
+     *
+     * @param room Room that contains the sender and recipient.
+     * @param peer Identifier of the intended file recipient.
+     * @param fileDetails Path to the file that will be transferred.
+     */
+    void
+    SendFileComplete(
+        const std::string& room,
+        const std::string& peer
+    );
+
+
+    /**
+     * @brief Creates an outgoing data channel and initiates peer negotiation.
+     *
+     * Configures the peer connection, gathers its initial SDP description and
+     * ICE candidates, stores the channel, and sends them to the peer in an
+     * `offer` message. When the channel opens, a worker sends each file path
+        * added to the channel's queue after its offer is accepted and signals
+        * completion after each transfer.
+     *
+     * @param peer Identifier of the intended remote peer.
+     * @param room Room containing the local client and remote peer.
+    * @return true if the channel was created and the offer was sent;
+    *         otherwise false.
+     */
+    bool
+    MakeDataChannel(
+        const std::string& peer,
+        const std::string& room
+    );
 
     /** @brief True if this client is a member of the room per the base class's room tracking. */
     bool InRoom(const std::string& room);
