@@ -403,8 +403,11 @@ private:
         std::filesystem::path destination;
     };
 
-    /** @brief Files currently being received, keyed by sender and room. */
-    std::map<PeerRoomKey, IncomingFile> m_incomingFiles;
+    /** @brief Files accepted from each sender and room, in offer order; the front one is being written. */
+    std::map<PeerRoomKey, std::deque<IncomingFile>> m_incomingFiles;
+
+    /** @brief Opens the next queued file (completing empty ones); call with m_incomingMutex held. */
+    void StartNextIncoming(std::deque<IncomingFile>& queue);
 
     /** @brief Normalized paths of received files whose directory event has not been consumed; guarded by m_incomingMutex. */
     std::set<std::string> m_receivedPaths;

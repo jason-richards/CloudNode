@@ -870,21 +870,42 @@ WebRTCClient::OnFileOffer(
 
     {
         std::lock_guard<std::mutex> lock(m_incomingMutex);
-        auto& incomingFile = m_incomingFiles[{peer, room}];
-        incomingFile.stream.close();
-        incomingFile.stream.clear();
+        auto& queue = m_incomingFiles[{peer, room}];
+        IncomingFile incomingFile;
         incomingFile.expectedSize = file["size"].GetInt64();
         incomingFile.destination = destination;
-        incomingFile.stream.open(destination, std::ios::binary | std::ios::trunc);
-        if (!incomingFile.stream) {
-            Logger::error() << "Unable to open destination file: " << destination.string();
+        queue.push_back(std::move(incomingFile));
+        if (queue.size() == 1) {
+            StartNextIncoming(queue);
+        }
+        if (queue.empty()) {
             m_incomingFiles.erase({peer, room});
-            return;
         }
     }
     Logger::info() << "Receiving file into: " << destination.string();
 
     SendFileAccept(doc);
+}
+
+void
+WebRTCClient::StartNextIncoming(
+    std::deque<IncomingFile>& queue
+) {
+    while (!queue.empty() && !queue.front().stream.is_open()) {
+        auto& next = queue.front();
+        next.stream.open(next.destination, std::ios::binary | std::ios::trunc);
+        if (!next.stream) {
+            Logger::error() << "Unable to open destination file: " << next.destination.string();
+            queue.pop_front();
+            continue;
+        }
+        if (next.expectedSize == 0) {
+            // An empty file sends no data, so it completes as soon as it is created.
+            m_receivedPaths.insert(fs::absolute(next.destination).lexically_normal().string());
+            next.stream.close();
+            queue.pop_front();
+        }
+    }
 }
 
 bool
@@ -905,29 +926,30 @@ WebRTCClient::OnIncomingChunk(
     {
         std::lock_guard<std::mutex> lock(m_incomingMutex);
         auto it = m_incomingFiles.find({peer, room});
-        if (it != m_incomingFiles.end() && it->second.stream.is_open()) {
-            auto& file = it->second;
+        if (it != m_incomingFiles.end() && !it->second.empty() && it->second.front().stream.is_open()) {
+            auto& queue = it->second;
+            auto& file = queue.front();
             file.stream.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
             file.stream.flush();
             const auto bytesWritten = file.stream.tellp();
-            const auto markReceived = [&]() {
-                m_receivedPaths.insert(fs::absolute(file.destination).lexically_normal().string());
-            };
+            bool finished = true;
             if (!file.stream || bytesWritten == std::streampos(-1)) {
                 Logger::error() << "Failed writing incoming file for peer '" << peer << "'.";
-                markReceived();
-                file.stream.close();
-                m_incomingFiles.erase(it);
             } else if (bytesWritten == file.expectedSize) {
-                markReceived();
-                file.stream.close();
-                m_incomingFiles.erase(it);
                 transferComplete = true;
             } else if (bytesWritten > file.expectedSize) {
                 Logger::error() << "Incoming file exceeded its offered size for peer '" << peer << "'.";
-                markReceived();
+            } else {
+                finished = false;
+            }
+            if (finished) {
+                m_receivedPaths.insert(fs::absolute(file.destination).lexically_normal().string());
                 file.stream.close();
-                m_incomingFiles.erase(it);
+                queue.pop_front();
+                StartNextIncoming(queue);
+                if (queue.empty()) {
+                    m_incomingFiles.erase(it);
+                }
             }
         }
     }

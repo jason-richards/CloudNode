@@ -45,6 +45,14 @@ add_test(
 )
 set_tests_properties(CloudNodeStaggeredFileTransfer PROPERTIES TIMEOUT 180)
 
+add_test(
+    NAME CloudNodeDirectorySync
+    COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/directory_sync_transfer.py
+        $<TARGET_FILE:CloudNode>
+)
+set_tests_properties(CloudNodeDirectorySync PROPERTIES TIMEOUT 240)
+
 add_executable(QueueFileClient QueueFileClient.cpp)
 target_link_libraries(QueueFileClient PRIVATE CloudNodeCore Threads::Threads)
 
