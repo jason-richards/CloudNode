@@ -16,12 +16,6 @@
 
 namespace {
 
-struct FileSpec {
-    std::string peer;
-    std::string room;
-    std::string path;
-};
-
 // Parses comma-separated "peer:room:path" entries; only the first two colons delimit, so paths may contain ':'.
 bool
 ParseFileSpecs(const std::string& text, std::vector<FileSpec>& specs) {
@@ -1026,6 +1020,7 @@ WebRTCClient::OnMessageClose(
         std::lock_guard<std::mutex> lock(m_dataChannelsMutex);
         m_dataChannels.clear();
         m_incomingChannels.clear();
+        ClearRooms();
     }
 }
 
@@ -1136,77 +1131,11 @@ WebRTCClient::StartClient() {
             std::sort(rooms.begin(), rooms.end());
             rooms.erase(std::unique(rooms.begin(), rooms.end()), rooms.end());
 
-            for (const auto& room : rooms) {
-                if (room.empty()) {
-                    continue;
-                }
-                m_room = room;
-                m_clientState = ClientState::CLIENT_WAITING_FOR_JOIN;
-                if (!JoinRoom(room)) {
-                    Logger::error() << "Failed to join '" << room << "'";
-                    m_clientState = ClientState::CLIENT_EXIT;
-                    break;
-                }
-                if (!m_clientStateChanged.wait_for(lock, timeout, [this]() {
-                    return m_clientState == ClientState::CLIENT_JOINED ||
-                           m_clientState == ClientState::CLIENT_INIT ||
-                           m_clientState == ClientState::CLIENT_EXIT;
-                })) {
-                    Logger::warn() << "Timed out waiting for \"join\" to complete.";
-                    m_clientState = ClientState::CLIENT_EXIT;
-                    break;
-                }
-                if (m_clientState == ClientState::CLIENT_EXIT ||
-                    m_clientState == ClientState::CLIENT_INIT) {
-                    break;
-                }
-            }
-            if (m_clientState == ClientState::CLIENT_EXIT ||
-                m_clientState == ClientState::CLIENT_INIT) {
-                continue;
-            }
-
-            // STEP 3: For each entry, wait for the peer, open a data channel if needed, and offer the file
-            for (const auto& spec : specs) {
-                const auto peerPresent = [this, &spec]() {
-                    std::vector<std::string> peers;
-                    GetPeers(spec.room, peers);
-                    return std::find(peers.begin(), peers.end(), spec.peer) != peers.end();
-                };
-                if (!m_clientStateChanged.wait_for(lock, timeout, [&]() {
-                    return m_clientState == ClientState::CLIENT_EXIT ||
-                           m_clientState == ClientState::CLIENT_INIT || peerPresent();
-                })) {
-                    Logger::warn() << "Timed out waiting for peer '" << spec.peer
-                                   << "' to join room '" << spec.room << "'.";
-                    m_clientState = ClientState::CLIENT_EXIT;
-                }
-                if (m_clientState == ClientState::CLIENT_EXIT ||
-                    m_clientState == ClientState::CLIENT_INIT) {
-                    break;
-                }
-
-                lock.unlock();
-                bool hasChannel;
-                {
-                    std::lock_guard<std::mutex> channelsLock(m_dataChannelsMutex);
-                    hasChannel = m_dataChannels.count({spec.peer, spec.room}) > 0;
-                }
-                const bool ready = hasChannel || MakeDataChannel(spec.peer, spec.room);
-                if (ready) {
-                    SendFileOffer(spec.room, spec.peer, spec.path);
-                }
-                lock.lock();
-                if (!ready && m_clientState != ClientState::CLIENT_EXIT &&
-                    m_clientState != ClientState::CLIENT_INIT) {
-                    m_clientState = ClientState::CLIENT_EXIT;
-                }
-                if (m_clientState == ClientState::CLIENT_EXIT ||
-                    m_clientState == ClientState::CLIENT_INIT) {
-                    break;
-                }
-            }
-            if (m_clientState == ClientState::CLIENT_EXIT ||
+            // STEP 3: Offer each file; OfferFiles waits for the peer and opens a data channel if needed
+            lock.unlock();
+            const bool offered = JoinRooms(rooms) && OfferFiles(specs);
+            lock.lock();
+            if (!offered || m_clientState == ClientState::CLIENT_EXIT ||
                 m_clientState == ClientState::CLIENT_INIT) {
                 continue;
             }
@@ -1224,11 +1153,30 @@ WebRTCClient::StartClient() {
             continue;
         }
 
+        if (m_clientState == ClientState::CLIENT_RUN && !m_queuedFiles.empty()) {
+            std::vector<FileSpec> specs(m_queuedFiles.begin(), m_queuedFiles.end());
+            m_queuedFiles.clear();
+
+            lock.unlock();
+            const bool offered = OfferFiles(specs);
+            lock.lock();
+            if (!offered || m_clientState == ClientState::CLIENT_EXIT ||
+                m_clientState == ClientState::CLIENT_INIT) {
+                continue;
+            }
+            if (m_clientState != ClientState::CLIENT_WAIT_FOR_FILE_ACCEPT) {
+                m_clientState = ClientState::CLIENT_RUN;
+            }
+            continue;
+        }
+
         if (m_clientState == ClientState::CLIENT_RUN) {
             const bool interrupted = m_clientStateChanged.wait_for(
                 lock,
                 timeout,
-                [this]() { return m_clientState != ClientState::CLIENT_RUN; }
+                [this]() {
+                    return m_clientState != ClientState::CLIENT_RUN || !m_queuedFiles.empty();
+                }
             );
             if (!interrupted && m_clientState == ClientState::CLIENT_RUN) {
                 m_clientState = ClientState::CLIENT_PING;
@@ -1268,6 +1216,141 @@ WebRTCClient::StartClient() {
                      m_clientState == ClientState::CLIENT_EXIT;
         });
     }
+}
+
+
+
+bool
+WebRTCClient::QueueFile(
+    const std::string& name,
+    const std::string& room,
+    const std::string& filePath
+) {
+    if (name.empty() || room.empty() || filePath.empty()) {
+        Logger::error() << "QueueFile requires a name, room, and file path.";
+        return false;
+    }
+    {
+        std::lock_guard<std::mutex> lock(m_clientStateMutex);
+        if (m_clientState == ClientState::CLIENT_EXIT) {
+            return false;
+        }
+        m_queuedFiles.push_back(FileSpec{name, room, filePath});
+    }
+    m_clientStateChanged.notify_all();
+    return true;
+}
+
+
+
+bool
+WebRTCClient::InRoom(
+    const std::string& room
+) {
+    std::vector<std::string> peers;
+    if (!GetPeers(room, peers)) {
+        return false;
+    }
+    const auto name = Properties().Get<std::string>("name");
+    return std::find(peers.begin(), peers.end(), name) != peers.end();
+}
+
+
+
+bool
+WebRTCClient::JoinRooms(
+    const std::vector<std::string>& rooms
+) {
+    const std::chrono::seconds timeout{Properties().Get<int>("timeout")};
+    std::unique_lock<std::mutex> lock(m_clientStateMutex);
+    const auto stopped = [this]() {
+        return m_clientState == ClientState::CLIENT_EXIT ||
+               m_clientState == ClientState::CLIENT_INIT;
+    };
+
+    for (const auto& room : rooms) {
+        if (m_clientState == ClientState::CLIENT_EXIT) {
+            return false;
+        }
+        if (room.empty() || InRoom(room)) {
+            continue;
+        }
+        m_room = room;
+        m_clientState = ClientState::CLIENT_WAITING_FOR_JOIN;
+        if (!JoinRoom(room)) {
+            Logger::error() << "Failed to join '" << room << "'";
+            m_clientState = ClientState::CLIENT_EXIT;
+            return false;
+        }
+        if (!m_clientStateChanged.wait_for(lock, timeout, [this]() {
+            return m_clientState == ClientState::CLIENT_JOINED ||
+                   m_clientState == ClientState::CLIENT_INIT ||
+                   m_clientState == ClientState::CLIENT_EXIT;
+        })) {
+            Logger::warn() << "Timed out waiting for \"join\" to complete.";
+            m_clientState = ClientState::CLIENT_EXIT;
+            return false;
+        }
+        if (stopped()) {
+            return false;
+        }
+    }
+    return true;
+}
+
+
+
+bool
+WebRTCClient::OfferFiles(
+    const std::vector<FileSpec>& specs
+) {
+    const std::chrono::seconds timeout{Properties().Get<int>("timeout")};
+
+    for (const auto& spec : specs) {
+        if (!JoinRooms({spec.room})) {
+            return false;
+        }
+
+        std::unique_lock<std::mutex> lock(m_clientStateMutex);
+        const auto stopped = [this]() {
+            return m_clientState == ClientState::CLIENT_EXIT ||
+                   m_clientState == ClientState::CLIENT_INIT;
+        };
+        const auto peerPresent = [this, &spec]() {
+            std::vector<std::string> peers;
+            GetPeers(spec.room, peers);
+            return std::find(peers.begin(), peers.end(), spec.peer) != peers.end();
+        };
+        if (!m_clientStateChanged.wait_for(lock, timeout, [&]() {
+            return stopped() || peerPresent();
+        })) {
+            Logger::warn() << "Timed out waiting for peer '" << spec.peer
+                           << "' to join room '" << spec.room << "'.";
+            m_clientState = ClientState::CLIENT_EXIT;
+        }
+        if (stopped()) {
+            return false;
+        }
+        lock.unlock();
+
+        bool hasChannel;
+        {
+            std::lock_guard<std::mutex> channelsLock(m_dataChannelsMutex);
+            hasChannel = m_dataChannels.count({spec.peer, spec.room}) > 0;
+        }
+        const bool ready = hasChannel || MakeDataChannel(spec.peer, spec.room);
+        if (ready) {
+            SendFileOffer(spec.room, spec.peer, spec.path);
+        }
+        lock.lock();
+        if (!ready && !stopped()) {
+            m_clientState = ClientState::CLIENT_EXIT;
+        }
+        if (stopped()) {
+            return false;
+        }
+    }
+    return true;
 }
 
 

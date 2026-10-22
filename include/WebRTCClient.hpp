@@ -6,11 +6,21 @@
 #include "Queue.hpp"
 #include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <fstream>
 #include <map>
 #include <mutex>
+#include <set>
 #include <utility>
 #include <thread>
+#include <vector>
+
+/** @brief A file to send to a peer in a room. */
+struct FileSpec {
+    std::string peer;
+    std::string room;
+    std::string path;
+};
 
 /**
  * @file WebRTCClient.hpp
@@ -85,6 +95,24 @@ public:
      * @return true if the ping message was accepted for sending.
      */
     bool SendPing();
+
+    /**
+     * @brief Asynchronously queues a file for sending to a peer.
+     *
+     * Returns immediately. The client worker joins the room if needed, waits for
+     * the peer, opens a data channel, and offers the file. Requests are handled
+     * in order.
+     *
+     * @param name Identifier of the recipient peer.
+     * @param room Room that contains the sender and recipient.
+     * @param filePath Path to the file to send.
+     * @return true if the request was queued; false if an argument is empty or the client is stopped.
+     */
+    bool QueueFile(
+        const std::string& name,
+        const std::string& room,
+        const std::string& filePath
+    );
 
     /**
      * @brief Queues a file and sends its metadata offer to a peer.
@@ -162,6 +190,21 @@ public:
         const std::string& peer,
         const std::string& room
     );
+
+    /**
+     * @brief Joins each room this client is not already in, waiting for each join to complete.
+     * @return false if a join failed, timed out, or the client stopped.
+     */
+    bool JoinRooms(const std::vector<std::string>& rooms);
+
+    /**
+     * @brief Offers each file to its peer, joining the file's room first if needed.
+     *
+     * Waits for the peer to be present and opens a data channel if none exists.
+     *
+     * @return false if a step failed, timed out, or the client stopped.
+     */
+    bool OfferFiles(const std::vector<FileSpec>& specs);
 
 protected:
 
@@ -244,6 +287,12 @@ private:
          * peer initialization, and runs the keepalive state machine.
      */
     void StartClient();
+
+    /** @brief Files requested through QueueFile, guarded by m_clientStateMutex. */
+    std::deque<FileSpec> m_queuedFiles;
+
+    /** @brief True if this client is a member of the room per the base class's room tracking. */
+    bool InRoom(const std::string& room);
 
     using PeerRoomKey = std::pair<std::string, std::string>;
 

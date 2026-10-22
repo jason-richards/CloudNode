@@ -90,6 +90,13 @@ WebRTC::GetPeers(
 
 
 void
+WebRTC::ClearRooms() {
+    std::lock_guard<std::mutex> lock(m_roomMutex);
+    m_rooms.clear();
+}
+
+
+void
 WebRTC::UpdatePeers(
     const std::string& room,
     std::set<std::string>& peers

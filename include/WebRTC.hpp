@@ -99,6 +99,10 @@ public:
     );
 
 
+    /** @brief Forgets all room membership, e.g. after the signalling connection drops. */
+    void ClearRooms();
+
+
     /**
      * @brief Replaces peer identifiers currently present in a room.
      *
