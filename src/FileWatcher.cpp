@@ -6,6 +6,7 @@
 #include <sys/inotify.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <vector>
 
@@ -25,9 +26,10 @@ FileWatcher::~FileWatcher() {
 }
 
 void
-FileWatcher::OnFile(Callback callback) {
+FileWatcher::OnFile(Callback callback, std::chrono::milliseconds timeout) {
     std::lock_guard<std::mutex> lock(m_callbackMutex);
     m_callback = std::move(callback);
+    m_timeout = timeout;
 }
 
 bool
@@ -56,6 +58,7 @@ FileWatcher::Start() {
 
     m_watches.clear();
     m_created.clear();
+    m_pending.clear();
     AddWatchTree(m_root, false);
     m_thread = std::thread(&FileWatcher::Run, this);
     return true;
@@ -84,7 +87,13 @@ FileWatcher::Run() {
     pollfd fds[2] = {{m_inotifyFd, POLLIN, 0}, {m_wakeFd, POLLIN, 0}};
 
     while (m_running) {
-        if (poll(fds, 2, -1) < 0) {
+        int waitMs = -1;
+        if (!m_pending.empty()) {
+            const auto remaining = std::chrono::ceil<std::chrono::milliseconds>(
+                m_deadline - std::chrono::steady_clock::now());
+            waitMs = static_cast<int>(std::max<long long>(0, remaining.count()));
+        }
+        if (poll(fds, 2, waitMs) < 0) {
             if (errno == EINTR) continue;
             Logger::error() << "FileWatcher: poll failed.";
             return;
@@ -98,6 +107,7 @@ FileWatcher::Run() {
                 HandleEvents(buffer.data(), length);
             }
         }
+        FlushIfQuiet();
     }
 }
 
@@ -164,12 +174,42 @@ FileWatcher::HandleEvents(const char* buffer, long length) {
 
 void
 FileWatcher::Notify(const fs::path& path, FileChange change) {
+    std::chrono::milliseconds timeout;
+    {
+        std::lock_guard<std::mutex> lock(m_callbackMutex);
+        timeout = m_timeout;
+    }
+
+    auto [it, inserted] = m_pending.try_emplace(path, change);
+    if (!inserted) {
+        FileChange& previous = it->second;
+        if (previous == FileChange::Added && change == FileChange::Modified) {
+            // Still a new file as far as the consumer is concerned.
+        } else if (previous == FileChange::Removed && change == FileChange::Added) {
+            previous = FileChange::Modified;
+        } else {
+            previous = change;
+        }
+    }
+    m_deadline = std::chrono::steady_clock::now() + timeout;
+}
+
+void
+FileWatcher::FlushIfQuiet() {
+    if (m_pending.empty() || std::chrono::steady_clock::now() < m_deadline) {
+        return;
+    }
+
     Callback callback;
     {
         std::lock_guard<std::mutex> lock(m_callbackMutex);
         callback = m_callback;
     }
+    auto ready = std::move(m_pending);
+    m_pending.clear();
     if (callback) {
-        callback(path, change);
+        for (const auto& [path, change] : ready) {
+            callback(path, change);
+        }
     }
 }
