@@ -173,9 +173,9 @@ WebRTCClient::MakeDataChannel(
                 }
 
                 const auto& filePath = *queuedFilePath;
-                std::ifstream file(filePath, std::ios::binary);
+                LockedIfstream file(filePath);
                 if (!file) {
-                    Logger::error() << "Unable to open file for transfer: " << filePath;
+                    Logger::error() << "Unable to lock or open file for transfer: " << filePath;
                     continue;
                 }
 
@@ -893,6 +893,12 @@ WebRTCClient::StartNextIncoming(
 ) {
     while (!queue.empty() && !queue.front().stream.is_open()) {
         auto& next = queue.front();
+        // Lock before truncating so a reader never sees a partial file.
+        if (!next.lock.Acquire(next.destination, FileLock::Mode::Exclusive, false)) {
+            Logger::error() << "Unable to lock destination file: " << next.destination.string();
+            queue.pop_front();
+            continue;
+        }
         next.stream.open(next.destination, std::ios::binary | std::ios::trunc);
         if (!next.stream) {
             Logger::error() << "Unable to open destination file: " << next.destination.string();

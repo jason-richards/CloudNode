@@ -4,6 +4,7 @@
 #include "WebRTC.hpp"
 #include "LocalDescription.hpp"
 #include "Queue.hpp"
+#include "FileLock.hpp"
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
@@ -398,6 +399,7 @@ private:
     std::mutex m_incomingMutex;
 
     struct IncomingFile {
+        FileLock lock;  // Declared before stream so it is released after the stream closes.
         std::ofstream stream;
         std::int64_t expectedSize{0};
         std::filesystem::path destination;
