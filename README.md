@@ -177,22 +177,28 @@ cmake --build build --target ios_app    # build the iOS libraries and the app
 cmake --build build --target ios_run    # build, install, and launch on a device
 cmake --build build --target ios_libs   # build only the iOS libraries
 ```
-The libraries and the C headers they need are generated into
-`build/iOS/deps/iphoneos` (`lib/` and `include/`); nothing generated is written
-to the source tree except the app, `iOS/xtool/CloudNodeClient.app`. A fresh
-checkout has no libraries until you run `ios_libs` or `ios_app`. Deleting or
-emptying `build/` means configuring again and re-downloading dependencies.
 
-To run xtool by hand from `iOS/` instead, put the Swift toolchain on your
-`PATH`, point `Package.swift` at the generated files, and use
-`xtool dev build` or `xtool dev`:
+The libraries and the C headers they need are generated into
+`build/iOS/deps/iphoneos` (`lib/` and `include/`). `iOS/Package.swift.in` is a
+template: CMake turns it into `build/iOS/package/Package.swift`, next to copies
+of `xtool.yml` and `Info.plist` and a link to `iOS/Sources`. xtool and SwiftPM
+run there, so the app is written to
+`build/iOS/package/xtool/CloudNodeClient.app` and nothing generated lands in
+the source tree. A fresh checkout has no libraries until you run `ios_libs` or
+`ios_app`. Deleting or emptying `build/` means configuring again and
+re-downloading dependencies.
+
+To run xtool by hand, put the Swift toolchain on your `PATH` and work in the
+generated package:
 
 ```sh
-export CLOUDNODE_IOS_DEPS=$PWD/build/iOS/deps/iphoneos   # from the repository root
+cd build/iOS/package
+xtool dev build    # or: xtool dev
 ```
 
-CMake sets this variable itself for the `ios_app` and `ios_run` targets, and
-`Package.swift` falls back to `build/iOS/deps/iphoneos` when it is unset.
+Edits to `iOS/Sources` are picked up directly. After changing `xtool.yml`,
+`Info.plist`, or `Package.swift.in`, rerun the `cmake -S . -B build` command to
+regenerate the package.
 
 CMake finds Swift under `/opt/swift-*/usr/bin`. Override these cache variables
 if your setup differs:
@@ -203,7 +209,7 @@ if your setup differs:
 | `IOS_PLATFORM` | `iphoneos` | `iphoneos` or `iphonesimulator`. |
 | `IOS_MIN_VERSION` | `17.0` | Minimum iOS version. |
 
-`Package.swift` links only the `iphoneos` libraries. Set a real bundle ID in
+The package links only the `iphoneos` libraries. Set a real bundle ID in
 `iOS/xtool.yml` before installing on a device; it is a placeholder.
 
 ### Using the App

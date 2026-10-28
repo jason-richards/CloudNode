@@ -30,7 +30,7 @@ endif()
 set(IOS_TOOLCHAIN "${CMAKE_CURRENT_BINARY_DIR}/ios-toolchain.cmake")
 configure_file(cmake/ios-toolchain.cmake.in "${IOS_TOOLCHAIN}" @ONLY)
 
-# Package.swift reads this directory through CLOUDNODE_IOS_DEPS.
+# Linked by the generated Package.swift.
 set(IOS_DEPS_DIR "${CMAKE_CURRENT_BINARY_DIR}/deps/${IOS_PLATFORM}")
 set(IOS_VENDOR_LIB_DIR "${IOS_DEPS_DIR}/lib")
 set(IOS_HEADER_DIR "${IOS_DEPS_DIR}/include")
@@ -87,13 +87,21 @@ ExternalProject_Add(ios_libdatachannel
 
 add_custom_target(ios_libs DEPENDS ios_libdatachannel)
 
-set(_xtool_env ${CMAKE_COMMAND} -E env
-    "PATH=${IOS_SWIFT_BIN}:$ENV{PATH}"
-    "CLOUDNODE_IOS_DEPS=${IOS_DEPS_DIR}")
+# xtool needs Package.swift at the package root. It is generated in the build tree
+# and shares the sources, so nothing xtool or SwiftPM produce lands in the source tree.
+set(IOS_PACKAGE_DIR "${CMAKE_CURRENT_BINARY_DIR}/package")
+configure_file(Package.swift.in "${IOS_PACKAGE_DIR}/Package.swift" @ONLY)
+configure_file(xtool.yml "${IOS_PACKAGE_DIR}/xtool.yml" COPYONLY)
+configure_file(Info.plist "${IOS_PACKAGE_DIR}/Info.plist" COPYONLY)
+if(NOT EXISTS "${IOS_PACKAGE_DIR}/Sources")
+    file(CREATE_LINK "${CMAKE_CURRENT_SOURCE_DIR}/Sources" "${IOS_PACKAGE_DIR}/Sources" SYMBOLIC)
+endif()
+
+set(_xtool_env ${CMAKE_COMMAND} -E env "PATH=${IOS_SWIFT_BIN}:$ENV{PATH}")
 
 add_custom_target(ios_app
     COMMAND ${_xtool_env} ${IOS_XTOOL_EXECUTABLE} dev build
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    WORKING_DIRECTORY "${IOS_PACKAGE_DIR}"
     COMMENT "Building the iOS app with xtool"
     USES_TERMINAL
     VERBATIM
@@ -102,7 +110,7 @@ add_dependencies(ios_app ios_libs)
 
 add_custom_target(ios_run
     COMMAND ${_xtool_env} ${IOS_XTOOL_EXECUTABLE} dev
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    WORKING_DIRECTORY "${IOS_PACKAGE_DIR}"
     COMMENT "Installing and launching the iOS app with xtool"
     USES_TERMINAL
     VERBATIM
