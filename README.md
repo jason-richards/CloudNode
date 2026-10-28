@@ -155,6 +155,12 @@ without `--peer` or `--file`:
   your `PATH`.
 - The xtool Darwin SDK, installed once with `xtool setup`. This needs an Apple
   ID and the Xcode download. Check it with `xtool sdk status`.
+- To install on a device, an Apple Developer login (`xtool auth login`; check
+  with `xtool auth status`) and an iPhone connected by USB that trusts this
+  computer and has Developer Mode on. `xtool devices` lists connected devices.
+  Building without installing needs neither.
+- The iOS targets are part of the main CMake project, so configuring it still
+  needs the normal build prerequisites (OpenSSL, zlib, libb64).
 - `git` and `python3`; the first build clones Mbed TLS from GitHub.
 
 ### Building
