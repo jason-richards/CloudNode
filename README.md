@@ -167,7 +167,9 @@ without `--peer` or `--file`:
 
 The app uses libdatachannel, the same library as CloudNode, through its C API.
 CMake cross-builds libdatachannel and Mbed TLS for iOS, then runs xtool. The
-iOS targets are off by default:
+iOS targets are off by default. Run these from the repository root; the first
+command configures the `build` directory, which every `--build` command needs
+(without it CMake reports `Error: could not load cache`):
 
 ```sh
 cmake -S . -B build -DBUILD_IOS_APP=ON
@@ -175,11 +177,22 @@ cmake --build build --target ios_app    # build the iOS libraries and the app
 cmake --build build --target ios_run    # build, install, and launch on a device
 cmake --build build --target ios_libs   # build only the iOS libraries
 ```
+The libraries and the C headers they need are generated into
+`build/iOS/deps/iphoneos` (`lib/` and `include/`); nothing generated is written
+to the source tree except the app, `iOS/xtool/CloudNodeClient.app`. A fresh
+checkout has no libraries until you run `ios_libs` or `ios_app`. Deleting or
+emptying `build/` means configuring again and re-downloading dependencies.
 
-The built libraries go to `iOS/Vendor/iphoneos/lib` and the C headers to
-`iOS/Sources/CRTC/include`. The app is written to `iOS/xtool/CloudNodeClient.app`.
-After the libraries exist you can also work from `iOS/` directly with
-`xtool dev build` and `xtool dev`, with the Swift toolchain on your `PATH`.
+To run xtool by hand from `iOS/` instead, put the Swift toolchain on your
+`PATH`, point `Package.swift` at the generated files, and use
+`xtool dev build` or `xtool dev`:
+
+```sh
+export CLOUDNODE_IOS_DEPS=$PWD/build/iOS/deps/iphoneos   # from the repository root
+```
+
+CMake sets this variable itself for the `ios_app` and `ios_run` targets, and
+`Package.swift` falls back to `build/iOS/deps/iphoneos` when it is unset.
 
 CMake finds Swift under `/opt/swift-*/usr/bin`. Override these cache variables
 if your setup differs:

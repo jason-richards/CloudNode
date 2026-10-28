@@ -30,9 +30,10 @@ endif()
 set(IOS_TOOLCHAIN "${CMAKE_CURRENT_BINARY_DIR}/ios-toolchain.cmake")
 configure_file(cmake/ios-toolchain.cmake.in "${IOS_TOOLCHAIN}" @ONLY)
 
-# Package.swift links against Vendor/iphoneos/lib.
-set(IOS_VENDOR_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Vendor/${IOS_PLATFORM}/lib")
-set(IOS_HEADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Sources/CRTC/include")
+# Package.swift reads this directory through CLOUDNODE_IOS_DEPS.
+set(IOS_DEPS_DIR "${CMAKE_CURRENT_BINARY_DIR}/deps/${IOS_PLATFORM}")
+set(IOS_VENDOR_LIB_DIR "${IOS_DEPS_DIR}/lib")
+set(IOS_HEADER_DIR "${IOS_DEPS_DIR}/include")
 
 set(IOS_MBEDTLS_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/mbedtls-install")
 
@@ -86,7 +87,9 @@ ExternalProject_Add(ios_libdatachannel
 
 add_custom_target(ios_libs DEPENDS ios_libdatachannel)
 
-set(_xtool_env ${CMAKE_COMMAND} -E env "PATH=${IOS_SWIFT_BIN}:$ENV{PATH}")
+set(_xtool_env ${CMAKE_COMMAND} -E env
+    "PATH=${IOS_SWIFT_BIN}:$ENV{PATH}"
+    "CLOUDNODE_IOS_DEPS=${IOS_DEPS_DIR}")
 
 add_custom_target(ios_app
     COMMAND ${_xtool_env} ${IOS_XTOOL_EXECUTABLE} dev build

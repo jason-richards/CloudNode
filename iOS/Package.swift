@@ -2,10 +2,13 @@
 import Foundation
 import PackageDescription
 
-// Static libraries are produced by scripts/build-libdatachannel.sh.
-let vendorLibs = URL(fileURLWithPath: #filePath)
-    .deletingLastPathComponent()
-    .appendingPathComponent("Vendor/iphoneos/lib").path
+// CMake builds the libdatachannel libraries and headers into <build>/iOS/deps/<platform>
+// and exports this variable when it runs xtool; set it yourself when running xtool by hand.
+let depsDir = ProcessInfo.processInfo.environment["CLOUDNODE_IOS_DEPS"]
+    ?? URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("build/iOS/deps/iphoneos").path
 
 let package = Package(
     name: "CloudNodeClient",
@@ -17,7 +20,7 @@ let package = Package(
         .target(
             name: "CRTC",
             linkerSettings: [
-                .unsafeFlags(["-L\(vendorLibs)"], .when(platforms: [.iOS])),
+                .unsafeFlags(["-L\(depsDir)/lib"], .when(platforms: [.iOS])),
                 .linkedLibrary("datachannel", .when(platforms: [.iOS])),
                 .linkedLibrary("juice", .when(platforms: [.iOS])),
                 .linkedLibrary("usrsctp", .when(platforms: [.iOS])),
@@ -30,7 +33,11 @@ let package = Package(
         .target(
             name: "CloudNodeClient",
             dependencies: ["CRTC"],
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+                // CRTC.h includes rtc.h from the generated deps directory.
+                .unsafeFlags(["-Xcc", "-I\(depsDir)/include"]),
+            ]
         ),
     ]
 )
