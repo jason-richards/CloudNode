@@ -198,3 +198,8 @@ include(CTest)
 if(BUILD_TESTING)
     add_subdirectory(tests)
 endif()
+
+option(BUILD_IOS_APP "Add targets that build the iOS app (needs Swift and xtool)" OFF)
+if(BUILD_IOS_APP)
+    add_subdirectory(iOS)
+endif()

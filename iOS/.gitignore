@@ -1,0 +1,6 @@
+.build/
+.swiftpm/
+xtool/
+*.ipa
+.deps/
+Vendor/

@@ -133,3 +133,73 @@ ctest --test-dir build --output-on-failure
 The tests cover core utilities, command-line options, room membership, metadata,
 and end-to-end file transfer scenarios using a local signalling server and
 clients.
+
+## iOS App
+
+The `iOS/` directory contains a Swift app, built with [xtool](https://github.com/xtool-org/xtool),
+that sends photos from an iPhone to a CloudNode client. In the app you set the
+server address, a name and room for the device, and a name and room for the
+remote client. After you tap Connect, it joins the rooms, opens a data channel
+to the remote client, and then lets you pick photos to send.
+
+The app is the side that opens the data channel, so run the receiving client
+without `--peer` or `--file`:
+
+```sh
+./build/CloudNode --name receiver --room project --directory ./received
+```
+
+### Requirements
+
+- A Swift toolchain on Linux (for example under `/opt/swift-*`), and `xtool` on
+  your `PATH`.
+- The xtool Darwin SDK, installed once with `xtool setup`. This needs an Apple
+  ID and the Xcode download. Check it with `xtool sdk status`.
+- `git` and `python3`; the first build clones Mbed TLS from GitHub.
+
+### Building
+
+The app uses libdatachannel, the same library as CloudNode, through its C API.
+CMake cross-builds libdatachannel and Mbed TLS for iOS, then runs xtool. The
+iOS targets are off by default:
+
+```sh
+cmake -S . -B build -DBUILD_IOS_APP=ON
+cmake --build build --target ios_app    # build the iOS libraries and the app
+cmake --build build --target ios_run    # build, install, and launch on a device
+cmake --build build --target ios_libs   # build only the iOS libraries
+```
+
+The built libraries go to `iOS/Vendor/iphoneos/lib` and the C headers to
+`iOS/Sources/CRTC/include`. The app is written to `iOS/xtool/CloudNodeClient.app`.
+After the libraries exist you can also work from `iOS/` directly with
+`xtool dev build` and `xtool dev`, with the Swift toolchain on your `PATH`.
+
+CMake finds Swift under `/opt/swift-*/usr/bin`. Override these cache variables
+if your setup differs:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `IOS_SDK_ROOT` | `~/.swiftpm/swift-sdks/darwin.artifactbundle/Developer/Platforms` | Platforms directory of the xtool Darwin SDK. |
+| `IOS_PLATFORM` | `iphoneos` | `iphoneos` or `iphonesimulator`. |
+| `IOS_MIN_VERSION` | `17.0` | Minimum iOS version. |
+
+`Package.swift` links only the `iphoneos` libraries. Set a real bundle ID in
+`iOS/xtool.yml` before installing on a device; it is a placeholder.
+
+### Using the App
+
+1. Start the signalling server and a receiving client as shown above.
+2. In the app, enter the server address (for example `ws://192.0.2.10:8080`),
+   and optionally a STUN server.
+3. Enter a unique name and a room for the device, and the name and room of the
+   remote client.
+4. Tap Connect. The status moves through joining rooms, waiting for the peer,
+   and establishing the data channel. The Log section lists each signalling
+   step.
+5. When the status shows Connected, choose photos to send. Each photo is
+   offered to the receiver and sent once it accepts.
+
+The app allows plain `ws://` connections and asks for the Local Network
+permission, both set in `iOS/Info.plist`. Photos are loaded fully into memory
+before sending.

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDisplayName</key>
+    <string>CloudNode</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Connects to a CloudNode server and peer on your local network.</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <!-- CloudNode signaling uses plain ws:// -->
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
+</dict>
+</plist>
