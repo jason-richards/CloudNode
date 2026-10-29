@@ -1,5 +1,6 @@
 import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @EnvironmentObject private var manager: ConnectionManager
@@ -12,6 +13,7 @@ struct ContentView: View {
     @AppStorage("peerRoom") private var peerRoom = ""
 
     @State private var selection: [PhotosPickerItem] = []
+    @State private var isFileImporterPresented = false
 
     private var canConnect: Bool {
         ![serverAddress, name, room, peerName, peerRoom].contains { $0.trimmingCharacters(in: .whitespaces).isEmpty }
@@ -59,7 +61,25 @@ struct ContentView: View {
                         PhotosPicker(selection: $selection, matching: .images) {
                             Label("Select Photos to Send", systemImage: "photo.on.rectangle")
                         }
-                        ForEach(manager.transfers) { transfer in
+                        ForEach(manager.transfers.filter { $0.category == .photo }) { transfer in
+                            TransferRow(transfer: transfer)
+                        }
+                    }
+                    Section("Videos") {
+                        PhotosPicker(selection: $selection, matching: .videos) {
+                            Label("Select Videos to Send", systemImage: "photo.on.rectangle")
+                        }
+                        ForEach(manager.transfers.filter { $0.category == .video }) { transfer in
+                            TransferRow(transfer: transfer)
+                        }
+                    }
+                    Section("Files") {
+                        Button {
+                            isFileImporterPresented = true
+                        } label: {
+                            Label("Select File to Send", systemImage: "doc")
+                        }
+                        ForEach(manager.transfers.filter { $0.category == .file }) { transfer in
                             TransferRow(transfer: transfer)
                         }
                     }
@@ -74,6 +94,13 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("CloudNode")
+            .fileImporter(
+                isPresented: $isFileImporterPresented,
+                allowedContentTypes: [.item]
+            ) { result in
+                guard case .success(let url) = result else { return }
+                Task { await manager.send(url) }
+            }
             .onChange(of: selection) { _, items in
                 guard !items.isEmpty else { return }
                 selection = []

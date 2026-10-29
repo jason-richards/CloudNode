@@ -13,10 +13,12 @@ struct ConnectionConfig {
 }
 
 struct Transfer: Identifiable {
+    enum Category { case photo, video, file }
     enum Status { case waiting, sending, done, rejected, failed }
     let id = UUID()
     var name: String
     var size: Int
+    var category: Category
     var sent = 0
     var status = Status.waiting
 }
@@ -211,22 +213,44 @@ final class ConnectionManager: ObservableObject {
 
     func send(_ items: [PhotosPickerItem]) async {
         for item in items {
-            await send(item)
+            let category: Transfer.Category = item.supportedContentTypes.contains { $0.conforms(to: .movie) } ? .video : .photo
+            await send(item, category: category)
         }
     }
 
-    private func send(_ item: PhotosPickerItem) async {
+    private func send(_ item: PhotosPickerItem, category: Transfer.Category) async {
         let type = item.supportedContentTypes.first
         let ext = type?.preferredFilenameExtension ?? "bin"
         let mime = type?.preferredMIMEType ?? "application/octet-stream"
         let name = "IMG_\(UUID().uuidString.prefix(8)).\(ext)"
 
         guard let data = try? await item.loadTransferable(type: Data.self) else {
-            transfers.append(Transfer(name: name, size: 0, status: .failed))
+            transfers.append(Transfer(name: name, size: 0, category: category, status: .failed))
             return
         }
+        await send(data: data, name: name, mime: mime, category: category)
+    }
+
+    func send(_ url: URL) async {
+        let name = url.lastPathComponent
+        let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
+        let hasAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if hasAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        guard let data = try? Data(contentsOf: url) else {
+            transfers.append(Transfer(name: name, size: 0, category: .file, status: .failed))
+            return
+        }
+        await send(data: data, name: name, mime: mime, category: .file)
+    }
+
+    private func send(data: Data, name: String, mime: String, category: Transfer.Category) async {
         let index = transfers.count
-        transfers.append(Transfer(name: name, size: data.count))
+        transfers.append(Transfer(name: name, size: data.count, category: category))
 
         guard let config, let signaling, let session, state == .ready else {
             transfers[index].status = .failed
